@@ -216,7 +216,6 @@ else(USE_LAPACK)
   endif()
 endif()
 
-
 if(UNIX)
   find_library(RTLIB rt)
   if(RTLIB)
