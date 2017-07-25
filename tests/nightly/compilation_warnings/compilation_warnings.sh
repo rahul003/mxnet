@@ -18,7 +18,8 @@ sudo apt-get -y install time g++-5
 runme make clean >/dev/null
 runme mkdir build
 echo "Starting make"
-runme CC="g++-5" CXX="g++-5" /usr/bin/time -f "%e" make -j$(nproc)
+sudo ln /usr/bin/g++-5 /usr/bin/g++
+runme /usr/bin/time make -j$(nproc)
 head -10 build/compile_output.txt
 echo "Finished make. Now processing output"
 python tests/nightly/compilation_warnings/process_output.py build/compile_output.txt
