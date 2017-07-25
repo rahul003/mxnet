@@ -13,7 +13,7 @@ runme() {
 }
 sudo add-apt-repository ppa:ubuntu-toolchain-r/test
 sudo apt-get update
-sudo apt-get install time g++-5
+sudo apt-get -y install time g++-5
 runme make clean >/dev/null
 runme mkdir build
 echo "Starting make-default"
