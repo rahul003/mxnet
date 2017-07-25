@@ -11,6 +11,8 @@ runme() {
 		exit 1
 	fi
 }
+g++ -dumpversion
+
 sudo add-apt-repository ppa:ubuntu-toolchain-r/test
 sudo apt-get update
 sudo apt-get -y install time g++-5
