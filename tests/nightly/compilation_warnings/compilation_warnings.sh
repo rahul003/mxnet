@@ -18,6 +18,7 @@ sudo apt-get -y install time g++-5
 runme make clean >/dev/null
 runme mkdir build
 echo "Starting make"
+sudo rm /usr/bin/g++
 sudo ln /usr/bin/g++-5 /usr/bin/g++
 runme /usr/bin/time make -j$(nproc)
 head -10 build/compile_output.txt
