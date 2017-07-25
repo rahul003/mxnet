@@ -11,6 +11,8 @@ runme() {
 		exit 1
 	fi
 }
+sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+sudo apt-get update
 sudo apt-get install time g++-5
 runme make clean >/dev/null
 runme mkdir build
