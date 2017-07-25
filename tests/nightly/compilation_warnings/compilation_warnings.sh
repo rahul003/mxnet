@@ -17,4 +17,4 @@ runme mkdir build
 echo "Starting make"
 runme /usr/bin/time -f "%e" make -j$(nproc) &> build/compile_output.txt
 echo "Finished make. Now processing output"
-python tests/nightly/compilation_warnings.py build/compile_output.txt
+python tests/nightly/compilation_warnings/process_output.py build/compile_output.txt
