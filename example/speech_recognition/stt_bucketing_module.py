@@ -21,6 +21,7 @@ from log_util import LogUtil
 class STTModule(mx.mod.Module):
 # 1-bit compression
     def Gradient_Compression_1bit(self):
+        scale = 0.01
         log = LogUtil().getlogger()
         array = self._exec_group.grad_arrays
         num_params = len(array)
@@ -47,7 +48,6 @@ class STTModule(mx.mod.Module):
                 nega_num = 0
                 layer = array[i][c].asnumpy()
                 # Get average value of positive and negative
-                
                 layer += self.tmp_array[i][c]
                 # log.info(layer.shape)
                 sum_pos += sum(layer[layer>=0])
@@ -58,14 +58,11 @@ class STTModule(mx.mod.Module):
                 # add res
                 self.tmp_array[i][c] = np.copy(layer)
 
-                layer[layer>=0] = sum_pos / pos_num
-                layer[layer<0] = sum_nega / nega_num
+                layer[layer>=0] = sum_pos / (pos_num+scale)
+                layer[layer<0] = sum_nega / (nega_num+scale)
                 # calc res
                 self.tmp_array[i][c] -= layer
-                # log.info(self._exec_group.grad_arrays[i][c].asnumpy())
                 mx.nd.array(layer).copyto(self._exec_group.grad_arrays[i][c])
-                # log.info(self._exec_group.grad_arrays[i][c].asnumpy())
-                # log.info(self._exec_group.grad_arrays[i][c].shape)
 
     def compress(self, numbits):
         if numbits==1:
