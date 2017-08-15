@@ -26,6 +26,8 @@ class STTModule(mx.mod.Module):
         array = self._exec_group.grad_arrays
         num_params = len(array)
         if not hasattr(self,'tmp_array'):
+            log.info(array)
+            log.info(self._exec_group.param_names)
             self.tmp_array = []
             for i in range(num_params):
                 t = []
@@ -42,7 +44,8 @@ class STTModule(mx.mod.Module):
                 layer = array[i][c].asnumpy()
                 # Get average value of positive and negative
                 layer += self.tmp_array[i][c]
-                
+                # if i==0 and c==0:
+                #     log.info(layer)
                 sum_pos += sum(layer[layer>=0])
                 sum_nega += sum(layer[layer<0])
                 pos_num += layer[layer>=0].size
@@ -52,36 +55,44 @@ class STTModule(mx.mod.Module):
 
                 layer[layer>=0] = sum_pos / (pos_num+scale)
                 layer[layer<0] = sum_nega / (nega_num+scale)
-                
+                # if i==0 and c==0:
+                #     log.info(layer)
                 self.tmp_array[i][c] -= layer
+                # if i==0 and c==0:
+                #     log.info(self.tmp_array[0][0])
                 mx.nd.array(layer).copyto(self._exec_group.grad_arrays[i][c])
 
     def gradient_compression_2bit(self):
-        neg = mx.nd.ones(1,)
-        neg[0] = -0.1
-        pos = mx.nd.ones(1,)
-        pos[0] = 0.1
         log = LogUtil().getlogger()
         array = self._exec_group.grad_arrays
         num_params = len(array)
         if not hasattr(self,'tmp_array'):
+            log.info(array)
+            log.info(self._exec_group.param_names)
             self.tmp_array = []
             for i in range(num_params):
                 t = []
                 for c in range(len(self._context)):
                     t.append(mx.nd.zeros(array[i][c].shape,self._context[c]))
                 self.tmp_array.append(t)
-            log.info('created temp array for 2bit compression')        
+            log.info('created temp array for 2bit compression')
+            self.neg = []
+            self.pos = []
+            for c in range(len(self._context)):
+                ntoadd = mx.nd.ones((1,),self._context[c])
+                ntoadd[0] = -0.1
+                self.neg.append(ntoadd)
+                ptoadd = mx.nd.ones((1,),self._context[c])
+                ptoadd[0] = 0.1
+                self.pos.append(ptoadd)
         for i in range(num_params):
             for c in range(len(self._context)):
                 layer = array[i][c]
                 layer += self.tmp_array[i][c]
                 layer.copyto(self.tmp_array[i][c])
-                log.info(layer)
-                # layer_out = mx.contrib.ndarray.quantize_2bit(layer, neg, pos)
-                # self.tmp_array[i][c] -= layer_out[0]
-                # layer_out[0].copyto(self._exec_group.grad_arrays[i][c])
-
+                layer_out = mx.contrib.ndarray.quantize_2bit(layer, self.neg[c], self.pos[c])
+                self.tmp_array[i][c] -= layer_out[0]
+                layer_out[0].copyto(self._exec_group.grad_arrays[i][c])
 
     def compress(self, numbits):
         if numbits==1:
