@@ -19,26 +19,19 @@ import mxnet as mx
 import numpy as np
 from log_util import LogUtil
 class STTModule(mx.mod.Module):
-# 1-bit compression
-    def Gradient_Compression_1bit(self):
+    # 1-bit compression
+    def gradient_compression_1bit(self):
         scale = 0.01
         log = LogUtil().getlogger()
         array = self._exec_group.grad_arrays
         num_params = len(array)
         if not hasattr(self,'tmp_array'):
-            log.info(array[0][0])
-            log.info(array[0][0].shape)
-            log.info(array[0][0].asnumpy().shape)
             self.tmp_array = []
-            # [np.zeros(array[i][j].asnumpy().shape) for i in range(num_params)] for j in range(len(self._context))]
             for i in range(num_params):
                 t = []
                 for c in range(len(self._context)):
                     t.append(np.zeros(array[i][c].asnumpy().shape))
                 self.tmp_array.append(t)
-            # for i in range(num_params):
-            #     for c in range(len(self._context)):
-            #         log.info(self.tmp_array[i][c].shape)
             log.info('created temp array for 1bit compression')        
         for i in range(num_params):
             for c in range(len(self._context)):
@@ -49,24 +42,52 @@ class STTModule(mx.mod.Module):
                 layer = array[i][c].asnumpy()
                 # Get average value of positive and negative
                 layer += self.tmp_array[i][c]
-                # log.info(layer.shape)
+                
                 sum_pos += sum(layer[layer>=0])
                 sum_nega += sum(layer[layer<0])
                 pos_num += layer[layer>=0].size
                 nega_num += layer[layer<0].size
-                # Write average value back
-                # add res
+                
                 self.tmp_array[i][c] = np.copy(layer)
 
                 layer[layer>=0] = sum_pos / (pos_num+scale)
                 layer[layer<0] = sum_nega / (nega_num+scale)
-                # calc res
+                
                 self.tmp_array[i][c] -= layer
                 mx.nd.array(layer).copyto(self._exec_group.grad_arrays[i][c])
 
+    def gradient_compression_2bit(self):
+        neg = mx.nd.ones(1,)
+        neg[0] = -0.1
+        pos = mx.nd.ones(1,)
+        pos[0] = 0.1
+        log = LogUtil().getlogger()
+        array = self._exec_group.grad_arrays
+        num_params = len(array)
+        if not hasattr(self,'tmp_array'):
+            self.tmp_array = []
+            for i in range(num_params):
+                t = []
+                for c in range(len(self._context)):
+                    t.append(mx.nd.zeros(array[i][c].shape,self._context[c]))
+                self.tmp_array.append(t)
+            log.info('created temp array for 2bit compression')        
+        for i in range(num_params):
+            for c in range(len(self._context)):
+                layer = array[i][c]
+                layer += self.tmp_array[i][c]
+                layer.copyto(self.tmp_array[i][c])
+                log.info(layer)
+                # layer_out = mx.contrib.ndarray.quantize_2bit(layer, neg, pos)
+                # self.tmp_array[i][c] -= layer_out[0]
+                # layer_out[0].copyto(self._exec_group.grad_arrays[i][c])
+
+
     def compress(self, numbits):
         if numbits==1:
-            self.Gradient_Compression_1bit()
+            self.gradient_compression_1bit()
+        elif numbits==2:
+            self.gradient_compression_2bit()
 
 class STTBucketingModule(mx.mod.BucketingModule):
     def save_checkpoint(self, prefix, epoch, save_optimizer_states=False):

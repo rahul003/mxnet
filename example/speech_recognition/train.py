@@ -108,9 +108,7 @@ def do_training(args, module, data_train, data_val, begin_epoch=0):
         loss_metric.reset()
         log.info('---------train---------')
         for nbatch, data_batch in enumerate(data_train):
-        #    log.info(module)
             module.forward_backward(data_batch)
-	    log.info('calling compress')
             module.compress(args.config.getint('train','compress'))
             module.update()
             # tensorboard setting
