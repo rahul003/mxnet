@@ -16,10 +16,62 @@
 # under the License.
 
 import mxnet as mx
+import numpy as np
+from log_util import LogUtil
+class STTModule(mx.mod.Module):
+# 1-bit compression
+    def Gradient_Compression_1bit(self):
+        log = LogUtil().getlogger()
+        array = self._exec_group.grad_arrays
+        num_params = len(array)
+        if not hasattr(self,'tmp_array'):
+            log.info(array[0][0])
+            log.info(array[0][0].shape)
+            log.info(array[0][0].asnumpy().shape)
+            self.tmp_array = []
+            # [np.zeros(array[i][j].asnumpy().shape) for i in range(num_params)] for j in range(len(self._context))]
+            for i in range(num_params):
+                t = []
+                for c in range(len(self._context)):
+                    t.append(np.zeros(array[i][c].asnumpy().shape))
+                self.tmp_array.append(t)
+            # for i in range(num_params):
+            #     for c in range(len(self._context)):
+            #         log.info(self.tmp_array[i][c].shape)
+            log.info('created temp array for 1bit compression')        
+        for i in range(num_params):
+            for c in range(len(self._context)):
+                sum_pos = 0
+                sum_nega = 0
+                pos_num = 0
+                nega_num = 0
+                layer = array[i][c].asnumpy()
+                # Get average value of positive and negative
+                
+                layer += self.tmp_array[i][c]
+                # log.info(layer.shape)
+                sum_pos += sum(layer[layer>=0])
+                sum_nega += sum(layer[layer<0])
+                pos_num += layer[layer>=0].size
+                nega_num += layer[layer<0].size
+                # Write average value back
+                # add res
+                self.tmp_array[i][c] = np.copy(layer)
 
+                layer[layer>=0] = sum_pos / pos_num
+                layer[layer<0] = sum_nega / nega_num
+                # calc res
+                self.tmp_array[i][c] -= layer
+                # log.info(self._exec_group.grad_arrays[i][c].asnumpy())
+                mx.nd.array(layer).copyto(self._exec_group.grad_arrays[i][c])
+                # log.info(self._exec_group.grad_arrays[i][c].asnumpy())
+                # log.info(self._exec_group.grad_arrays[i][c].shape)
+
+    def compress(self, numbits):
+        if numbits==1:
+            self.Gradient_Compression_1bit()
 
 class STTBucketingModule(mx.mod.BucketingModule):
-
     def save_checkpoint(self, prefix, epoch, save_optimizer_states=False):
         symbol, data_names, label_names = self._sym_gen(self._default_bucket_key)
         symbol.save('%s-symbol.json' % prefix)
