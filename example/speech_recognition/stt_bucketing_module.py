@@ -80,10 +80,10 @@ class STTModule(mx.mod.Module):
             self.pos = []
             for c in range(len(self._context)):
                 ntoadd = mx.nd.ones((1,),self._context[c])
-                ntoadd[0] = -0.1
+                ntoadd[0] = -0.5
                 self.neg.append(ntoadd)
                 ptoadd = mx.nd.ones((1,),self._context[c])
-                ptoadd[0] = 0.1
+                ptoadd[0] = 0.5
                 self.pos.append(ptoadd)
         for i in range(num_params):
             for c in range(len(self._context)):
@@ -92,6 +92,7 @@ class STTModule(mx.mod.Module):
                 layer.copyto(self.tmp_array[i][c])
                 layer_out = mx.contrib.ndarray.quantize_2bit(layer, self.neg[c], self.pos[c])
                 self.tmp_array[i][c] -= layer_out[0]
+                # log.info(layer_out[0].asnumpy())
                 layer_out[0].copyto(self._exec_group.grad_arrays[i][c])
 
     def compress(self, numbits):
