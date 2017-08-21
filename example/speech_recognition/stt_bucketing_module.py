@@ -26,8 +26,6 @@ class STTModule(mx.mod.Module):
         array = self._exec_group.grad_arrays
         num_params = len(array)
         if not hasattr(self,'tmp_array'):
-            log.info(array)
-            log.info(self._exec_group.param_names)
             self.tmp_array = []
             for i in range(num_params):
                 t = []
@@ -67,8 +65,6 @@ class STTModule(mx.mod.Module):
         array = self._exec_group.grad_arrays
         num_params = len(array)
         if not hasattr(self,'tmp_array'):
-            log.info(array)
-            log.info(self._exec_group.param_names)
             self.tmp_array = []
             for i in range(num_params):
                 t = []

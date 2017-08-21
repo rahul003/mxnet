@@ -43,9 +43,9 @@ def do_training(args, module, data_train, data_val, begin_epoch=0):
 
     contexts = parse_contexts(args)
     num_gpu = len(contexts)
-    eval_metric = STTMetric(batch_size=batch_size, num_gpu=num_gpu, seq_length=seq_len,is_logging=enable_logging_validation_metric,is_epoch_end=True)
+    eval_metric = STTMetric(batch_size=batch_size, num_gpu=num_gpu, is_logging=enable_logging_validation_metric,is_epoch_end=True)
     # tensorboard setting
-    loss_metric = STTMetric(batch_size=batch_size, num_gpu=num_gpu, seq_length=seq_len,is_logging=enable_logging_train_metric,is_epoch_end=False)
+    loss_metric = STTMetric(batch_size=batch_size, num_gpu=num_gpu, is_logging=enable_logging_train_metric,is_epoch_end=False)
 
     optimizer = args.config.get('train', 'optimizer')
     momentum = args.config.getfloat('train', 'momentum')
