@@ -10,8 +10,6 @@ docker_run = 'tests/ci_build/ci_build.sh'
 max_time = 60
 // assign any caught errors here
 err = null
-// set build status to success by default
-currentBuild.result = "SUCCESS"
 
 // initialize source codes
 def init_git() {
@@ -102,7 +100,7 @@ def python_gpu_ut(docker_type) {
 try {
     stage("Sanity Check") {
       timeout(time: max_time, unit: 'MINUTES') {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/sanity') {
             init_git()
             sh "python tools/license_header.py check"
@@ -115,7 +113,7 @@ try {
 
     stage('Build') {
       parallel 'CPU: Openblas': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/build-cpu') {
             init_git()
             def flag = """ \
@@ -131,7 +129,7 @@ try {
         }
       },
       'GPU: CUDA7.5+cuDNN5': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/build-gpu') {
             init_git()
             def flag = """ \
@@ -151,7 +149,7 @@ try {
         }
       },
       'Amalgamation MIN': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/amalgamation') {
             init_git()
             make('cpu', '-C amalgamation/ clean')
@@ -160,7 +158,7 @@ try {
         }
       },
       'Amalgamation': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/amalgamation') {
             init_git()
             make('cpu', '-C amalgamation/ clean')
@@ -169,7 +167,7 @@ try {
         }
       },
       'GPU: MKLML': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/build-mklml') {
             init_git()
             def flag = """ \
@@ -253,7 +251,7 @@ try {
 
     stage('Unit Test') {
       parallel 'Python2/3: CPU': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/ut-python-cpu') {
             init_git()
             unpack_lib('cpu')
@@ -262,7 +260,7 @@ try {
         }
       },
       'Python2/3: GPU': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/ut-python-gpu') {
             init_git()
             unpack_lib('gpu', mx_lib)
@@ -271,7 +269,7 @@ try {
         }
       },
       'Python2/3: MKLML': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/ut-python-mklml') {
             init_git()
             unpack_lib('mklml')
@@ -281,7 +279,7 @@ try {
         }
       },
       'Scala: CPU': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/ut-scala-cpu') {
             init_git()
             unpack_lib('cpu')
@@ -293,7 +291,7 @@ try {
         }
       },
       'Perl: CPU': {
-            node('mxnetlinux') {
+            node('linux') {
                 ws('workspace/ut-perl-cpu') {
                     init_git()
                     unpack_lib('cpu')
@@ -304,7 +302,7 @@ try {
             }
       },
       'Perl: GPU': {
-            node('mxnetlinux') {
+            node('linux') {
                 ws('workspace/ut-perl-gpu') {
                     init_git()
                     unpack_lib('gpu')
@@ -315,7 +313,7 @@ try {
             }
       },
       'R: CPU': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/ut-r-cpu') {
             init_git()
             unpack_lib('cpu')
@@ -330,7 +328,7 @@ try {
         }
       },
       'R: GPU': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/ut-r-gpu') {
             init_git()
             unpack_lib('gpu')
@@ -392,7 +390,7 @@ try {
 
     stage('Integration Test') {
       parallel 'Python': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/it-python-gpu') {
             init_git()
             unpack_lib('gpu')
@@ -403,7 +401,7 @@ try {
         }
       },
       'Caffe': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/it-caffe') {
             init_git()
             unpack_lib('gpu')
@@ -414,7 +412,7 @@ try {
         }
       },
       'cpp-package': {
-        node('mxnetlinux') {
+        node('linux') {
           ws('workspace/it-cpp-package') {
             init_git()
             unpack_lib('gpu')
@@ -428,7 +426,7 @@ try {
     }
 
     stage('Deploy') {
-      node('mxnetlinux') {
+      node('linux') {
         ws('workspace/docs') {
           if (env.BRANCH_NAME == "master") {
             init_git()
@@ -438,14 +436,15 @@ try {
         }
       }
     }
+  currentBuild.result = "SUCCESS"
 } catch (caughtError) {
-    node("mxnetlinux") {
+    node("linux") {
         sh "echo caught error"
         err = caughtError
         currentBuild.result = "FAILURE"
     }
 } finally {
-    node("mxnetlinux") {
+    node("linux") {
         // Only send email if master failed
         if (currentBuild.result == "FAILURE" && env.BRANCH_NAME == "master") {
             emailext body: 'Build for MXNet branch ${BRANCH_NAME} has broken. Please view the build at ${BUILD_URL}', replyTo: '${EMAIL}', subject: '[BUILD FAILED] Branch ${BRANCH_NAME} build ${BUILD_NUMBER}', to: '${EMAIL}'
