@@ -98,7 +98,7 @@ def python_gpu_ut(docker_type) {
 }
 
 try {
-  currentBuild.result = "SUCCESS"
+  currentBuild.result = "FAILURE"
 } catch (caughtError) {
     node("gpu-g2-8x") {
         sh "echo caught error"
