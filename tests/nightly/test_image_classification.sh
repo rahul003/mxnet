@@ -18,6 +18,7 @@
 # under the License.
 
 yum install bc
+apt-get install bc
 # setup
 export LD_LIBRARY_PATH=`pwd`/`dirname $0`/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 export PYTHONPATH=`pwd`/`dirname $0`/python
