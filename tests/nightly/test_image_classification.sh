@@ -59,8 +59,8 @@ juLog -name=Build -error=Error build
 # check if the final evaluation accuracy exceed the threshold
 check_val() {
     expected=$1
-    pass="Final validation >= $expected, Pass"
-    fail="Final validation < $expected, Fail"
+    pass="Final validation >= $expected, PASS"
+    fail="Final validation < $expected, FAIL"
     python ../../tools/parse_log.py log --format none | tail -n1 | \
         awk "{ if (\$3~/^[.0-9]+$/ && \$3 > $expected) print \"$pass\"; else print \"$fail\"}"
     rm -f log
@@ -88,6 +88,6 @@ test_lenet() {
        check_val $desired_accuracy
     done
 }
-juLog -name=Python.Lenet.Mnist -error=Fail test_lenet
+juLog -name=Python.Lenet.Mnist -error=FAIL test_lenet
 
 exit $errors
