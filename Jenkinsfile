@@ -100,13 +100,13 @@ def python_gpu_ut(docker_type) {
 try {
   currentBuild.result = "SUCCESS"
 } catch (caughtError) {
-    node("gpu") {
+    node("gpu-g2-8x") {
         sh "echo caught error"
         err = caughtError
         currentBuild.result = "FAILURE"
     }
 } finally {
-    node("gpu") {
+    node("gpu-g2-8x") {
         // Only send email if master failed
         if (currentBuild.result == "FAILURE" && env.BRANCH_NAME == "master") {
             emailext body: 'Build for MXNet branch ${BRANCH_NAME} has broken. Please view the build at ${BUILD_URL}', replyTo: '${EMAIL}', subject: '[BUILD FAILED] Branch ${BRANCH_NAME} build ${BUILD_NUMBER}', to: '${EMAIL}'
