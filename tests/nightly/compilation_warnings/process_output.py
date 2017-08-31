@@ -40,9 +40,9 @@ def generate_stats(warnings):
 
 def print_summary(env, time, warnings):
     sorted_warnings, total_count = generate_stats(warnings)
-    print "START - Compilation warnings count"
+    print "START - Compilation warnings count for ", env
     print total_count, 'warnings'
-    print "END - Compilation warnings count"
+    print "END - Compilation warnings count for ", env
     print 'START - Compilation warnings summary for ', env
     print 'For ',env
     print 'Time taken to compile:', time, 's'
