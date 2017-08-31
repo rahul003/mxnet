@@ -52,7 +52,7 @@ def print_summary(env, time, warnings):
         print count, ': ', warning
     print 'END - Compilation warnings summary for ',env
 
-env = open(sys.argv[1])
+env = sys.argv[1]
 c_output = open(sys.argv[2],'r')
 time, warnings = process_output(c_output.read())
 print_summary(time, warnings)
