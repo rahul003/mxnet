@@ -43,13 +43,15 @@ class KVStoreLocal : public KVStore {
   /*
    * \param use_device_comm
    */
-  explicit KVStoreLocal(bool use_device_comm) : KVStore() {
+  explicit KVStoreLocal(bool use_device_comm, const std::string& compress) : KVStore() {
     if (use_device_comm) {
-      comm_ = new CommDevice();
+      comm_ = new CommDevice(compress);
     } else {
       comm_ = new CommCPU();
     }
     pinned_ctx_ = comm_->pinned_ctx();
+    //may not be needed
+    compress_ = compress;
   }
 
   virtual ~KVStoreLocal() {
@@ -178,6 +180,7 @@ class KVStoreLocal : public KVStore {
     }
   }
 
+  std::string compress_;
   /// reducer and broadcaster
   Comm* comm_;
   /// pinned context

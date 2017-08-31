@@ -1,3 +1,4 @@
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -28,6 +29,7 @@
 #include <vector>
 #include <tuple>
 #include "mxnet/ndarray.h"
+#include "../operator/contrib/two_bit_quantize-inl.h"
 namespace mxnet {
 namespace kvstore {
 /**
@@ -221,8 +223,9 @@ class CommCPU : public Comm {
  */
 class CommDevice : public Comm {
  public:
-  CommDevice() {
+  CommDevice(const std::string& compress) {
     inited_ = false;
+    compress_ = compress;
   }
 
   virtual ~CommDevice() { }
@@ -252,7 +255,12 @@ class CommDevice : public Comm {
 
     auto& buf = merge_buf_[key];
     std::vector<NDArray> reduce(src.size());
-    CopyFromTo(src[0], &(buf.merged), priority);
+
+    if (compress_=='none') {
+      CopyFromTo(src[0], &(buf.merged), priority);
+    } else if (compress_ == '2bit'){
+      op::Dequantize2BitCompute<gpu>({}, {}, src[0].data(), {kWriteTo}, buf.merged.data());
+    }
     reduce[0] = buf.merged;
 
     if (buf.copy_buf.empty()) {
@@ -264,13 +272,25 @@ class CommDevice : public Comm {
       for (size_t i = 0; i < src.size()-1; ++i) {
         buf.copy_buf[i] = NDArray(
           buf.merged.shape(), buf.merged.ctx(), false, buf.merged.dtype());
+        if(compress_!='none') {
+          if(i==0){
+            buf.compr_copy_buf.resize(src.size());
+          }
+          buf.compr_copy_buf[i] = NDArray(src[0].shape(), buf.merged.ctx(), false, src[0].dtype());
+        }
       }
     }
+
     for (size_t i = 0; i < src.size()-1; ++i) {
-      CopyFromTo(src[i+1], &(buf.copy_buf[i]), priority);
+      if(compress_=='none') {
+        CopyFromTo(src[i+1], &(buf.copy_buf[i]), priority);
+      } else if(compress_=='2bit') {
+        CopyFromTo(src[i+1], &(buf.compr_copy_buf[i]), priority);
+        op::Dequantize2BitCompute<gpu>({}, {}, buf.compr_copy_buf[i].data(), buf.copy_buf[i].data());  
+      }
       reduce[i+1] = buf.copy_buf[i];
     }
-
+    
     ElementwiseSum(reduce, &buf.merged);
 
     return buf.merged;
@@ -370,6 +390,8 @@ class CommDevice : public Comm {
     }
     inited_ = true;
   }
+  
+  std::string compress_;
 
   std::vector<KeyAttrs> sorted_key_attrs_;
   /// \brief temporal space for pushing and pulling
@@ -378,6 +400,8 @@ class CommDevice : public Comm {
     NDArray merged;
     /// \brief the gpu buffer
     std::vector<NDArray> copy_buf;
+
+    std::vector<NDArray> compr_copy_buf;
   };
   std::unordered_map<int, BufferEntry> merge_buf_;
   bool inited_;

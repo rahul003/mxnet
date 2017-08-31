@@ -31,8 +31,9 @@
 
 namespace mxnet {
 
-KVStore* KVStore::Create(const char *type_name) {
+KVStore* KVStore::Create(const char *type_name, const char *compress) {
   std::string tname = type_name;
+  std::string comprtype = compress;
   std::transform(tname.begin(), tname.end(), tname.begin(), ::tolower);
   KVStore* kv = nullptr;
   bool use_device_comm = false;
@@ -55,7 +56,7 @@ KVStore* KVStore::Create(const char *type_name) {
     return nullptr;
 #endif  // MXNET_USE_DIST_KVSTORE
   } else {
-    kv =  new kvstore::KVStoreLocal(use_device_comm);
+    kv =  new kvstore::KVStoreLocal(use_device_comm, compress);
   }
   kv->type_ = tname;
   return kv;
