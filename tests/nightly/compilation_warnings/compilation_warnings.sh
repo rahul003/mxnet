@@ -39,8 +39,8 @@ runme mkdir build
 echo "Starting make on CPU with g++5"
 runme /usr/bin/time -f "%e" make CC=gcc-5 CXX=g++-5 USE_OPENCV=1 USE_BLAS=openblas -j $(nproc) 2>&1 | tee build/cpu_compile_log.txt
 echo "##############################"
-echo "Starting make on GPU with g++5"
-runme /usr/bin/time -f "%e" make CC=gcc-5 CXX=g++-5 USE_OPENCV=1 USE_BLAS=openblas USE_CUDA=1 USE_CUDA_PATH=/usr/local/cuda USE_CUDNN=1 -j $(nproc) 2>&1 | tee build/gpu_compile_log.txt
+echo "Starting make on GPU with g++4"
+runme /usr/bin/time -f "%e" make USE_OPENCV=1 USE_BLAS=openblas USE_CUDA=1 USE_CUDA_PATH=/usr/local/cuda USE_CUDNN=1 -j $(nproc) 2>&1 | tee build/gpu_compile_log.txt
 echo "Finished make. Now processing output"
 python tests/nightly/compilation_warnings/process_output.py cpu build/cpu_compile_output.txt
 python tests/nightly/compilation_warnings/process_output.py gpu build/gpu_compile_output.txt
