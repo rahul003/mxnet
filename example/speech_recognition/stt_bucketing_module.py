@@ -91,11 +91,11 @@ class STTModule(mx.mod.Module):
                 # log.info(layer_out[0].asnumpy())
                 layer_out[0].copyto(self._exec_group.grad_arrays[i][c])
 
-    def compress(self, numbits):
-        if numbits==1:
-            self.gradient_compression_1bit()
-        elif numbits==2:
-            self.gradient_compression_2bit()
+    # def compress(self, numbits):
+        # if numbits==1:
+            # self.gradient_compression_1bit()
+        # elif numbits==2:
+            # self.gradient_compression_2bit()
 
 class STTBucketingModule(mx.mod.BucketingModule):
     def save_checkpoint(self, prefix, epoch, save_optimizer_states=False):
