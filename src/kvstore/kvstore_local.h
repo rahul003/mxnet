@@ -63,8 +63,8 @@ class KVStoreLocal : public KVStore {
           << "duplicate init of key " << keys[i];
       local_[keys[i]] = values[i].Copy(pinned_ctx_);
       comm_->Init(keys[i], values[i].shape(), values[i].dtype());
-      comm_->SetCompress(compress_, pos_threshold_, neg_threshold_);
     }
+    comm_->SetCompress(compress_, pos_threshold_, neg_threshold_);
   }
 
   void Init(const std::vector<std::string>& str_keys,
