@@ -319,7 +319,7 @@ if __name__ == '__main__':
             label_names = [x[0] for x in data_train.provide_label]
             module = STTModule(model_loaded, context=contexts,
                                    data_names=data_names, label_names=label_names, 
-                                   compress='2bit', pos_threshold=0.5, neg_threshold=-0.5)
+                                   compress=args.config.get('train','compress'), pos_threshold=0.5, neg_threshold=-0.5)
         do_training(args=args, module=module, data_train=data_train, data_val=data_val)
     # if mode is 'load', it loads model from the checkpoint and continues the training.
     elif mode == 'load':
@@ -340,7 +340,7 @@ if __name__ == '__main__':
                 sym_gen=model_loaded,
                 default_bucket_key=data_train.default_bucket_key,
                 context=contexts,
-                compress='2bit',
+                compress=args.config.get('train','compress'),
                 pos_threshold=0.5,
                 neg_threshold=-0.5
                 )
