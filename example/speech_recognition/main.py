@@ -30,7 +30,7 @@ import numpy as np
 from stt_datagenerator import DataGenerator
 from stt_metric import STTMetric
 from stt_bi_graphemes_util import generate_bi_graphemes_dictionary
-from stt_bucketing_module import STTBucketingModule
+from stt_bucketing_module import STTBucketingModule, STTModule
 from stt_io_bucketingiter import BucketSTTIter
 sys.path.insert(0, "../../python")
 
@@ -246,7 +246,7 @@ def load_model(args, contexts, data_train):
             data_names = [x[0] for x in data_train.provide_data]
             label_names = [x[0] for x in data_train.provide_label]
 
-            model_loaded = mx.module.Module.load(
+            model_loaded = STTModule.load(
                 prefix=model_path, epoch=model_num_epoch, context=contexts,
                 data_names=data_names, label_names=label_names,
                 load_optimizer_states=load_optimizer_states)
@@ -317,8 +317,9 @@ if __name__ == '__main__':
         else:
             data_names = [x[0] for x in data_train.provide_data]
             label_names = [x[0] for x in data_train.provide_label]
-            module = mx.mod.Module(model_loaded, context=contexts,
-                                   data_names=data_names, label_names=label_names)
+            module = STTModule(model_loaded, context=contexts,
+                                   data_names=data_names, label_names=label_names, 
+                                   compress=args.config.get('train','compress'), pos_threshold=0.5, neg_threshold=-0.5)
         do_training(args=args, module=module, data_train=data_train, data_val=data_val)
     # if mode is 'load', it loads model from the checkpoint and continues the training.
     elif mode == 'load':
@@ -338,7 +339,10 @@ if __name__ == '__main__':
             model = STTBucketingModule(
                 sym_gen=model_loaded,
                 default_bucket_key=data_train.default_bucket_key,
-                context=contexts
+                context=contexts,
+                compress=args.config.get('train','compress'),
+                pos_threshold=0.5,
+                neg_threshold=-0.5
                 )
 
             model.bind(data_shapes=data_train.provide_data,

@@ -43,7 +43,7 @@ class Module(BaseModule):
     Parameters
     ----------
     symbol : Symbol
-    data_names : list of str
+    data_names : list of
         Defaults to `('data')` for a typical model used in image classification.
     label_names : list of str
         Defaults to `('softmax_label')` for a typical model used in image
@@ -59,10 +59,16 @@ class Module(BaseModule):
     state_names : list of str
         states are similar to data and label, but not provided by data iterator.
         Instead they are initialized to 0 and can be set by `set_states()`.
+    compress : str
+        whether using low-bit compression. Argument can be 'none' or '2bit' or '1bit'
+    pos_threshold : 
+        positive threshold used for 2bit compression
+    neg_threshold : 
+        negative threshold used for 2bit compression
     """
     def __init__(self, symbol, data_names=('data',), label_names=('softmax_label',),
                  logger=logging, context=ctx.cpu(), work_load_list=None,
-                 fixed_param_names=None, state_names=None):
+                 fixed_param_names=None, state_names=None, compress='none', pos_threshold=0.1, neg_threshold=-0.1):
         super(Module, self).__init__(logger=logger)
 
         if isinstance(context, ctx.Context):
@@ -74,6 +80,18 @@ class Module(BaseModule):
         self._work_load_list = work_load_list
 
         self._symbol = symbol
+
+        if not compress in ['none','2bit', '1bit']:
+            raise ValueError("Compress argument can only be 'none', '2bit' "\
+                             "or '1bit'")
+
+        if compress == '2bit' and ( pos_threshold<=0 and neg_threshold>=0 ):
+            raise ValueError("The pos_threshold must be greater than 0, and " \
+                             "the neg_threshold must be less than 0.")
+
+        self._compress = compress
+        self._pos_threshold = pos_threshold
+        self._neg_threshold = neg_threshold
 
         data_names = list(data_names) if data_names is not None else []
         label_names = list(label_names) if label_names is not None else []
@@ -527,6 +545,10 @@ class Module(BaseModule):
                                 arg_params=self._arg_params,
                                 param_names=self._param_names,
                                 update_on_kvstore=update_on_kvstore)
+            
+            if self._compress != 'none':
+                kvstore.set_compress(self._compress, self._pos_threshold, self._neg_threshold)
+
         if update_on_kvstore:
             kvstore.set_optimizer(self._optimizer)
         else:
