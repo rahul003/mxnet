@@ -24,10 +24,10 @@ import argparse
 import os, sys
 import signal
 import logging
-
+#import pdb
+#pdb.set_trace()
 curr_path = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(curr_path, "../dmlc-core/tracker"))
-
 def dmlc_opts(opts):
     """convert from mxnet's opts to dmlc's opts
     """
