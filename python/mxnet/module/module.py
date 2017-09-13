@@ -546,8 +546,7 @@ class Module(BaseModule):
                                 param_names=self._param_names,
                                 update_on_kvstore=update_on_kvstore)
             
-            if self._compress != 'none':
-                kvstore.set_compress(self._compress, self._pos_threshold, self._neg_threshold)
+            kvstore.set_compress(self._compress, self._pos_threshold, self._neg_threshold)
 
         if update_on_kvstore:
             kvstore.set_optimizer(self._optimizer)
