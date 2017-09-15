@@ -86,14 +86,14 @@ class Comm {
   void SetCompress(const std::string& compress,
                    float const pos_threshold,
                    float const neg_threshold) {
-    compress_ = compress;
+    compress_type_ = compress;
     pos_threshold_ = pos_threshold;
     neg_threshold_ = neg_threshold;
   }
 
  protected:
   Context pinned_ctx_;
-  std::string compress_ = "none";
+  std::string compress_type_ = "none";
   float pos_threshold_;
   float neg_threshold_;
 };
@@ -507,10 +507,10 @@ class CommDevice : public Comm {
         EnableP2P(devs);
       }
     }
-    
+
     auto& buf = merge_buf_[key];
     std::vector<NDArray> reduce(src.size());
-    
+
     if (buf.copy_buf.empty()) {
       // TODO(mli) this results in large device memory usage for huge ndarray,
       // such as the largest fullc in VGG. consider to do segment reduce with
@@ -527,13 +527,13 @@ class CommDevice : public Comm {
         buf.copy_buf[i] = NDArray(
           buf.merged.shape(), buf.merged.ctx(), false, buf.merged.dtype());
         // allocation small buffer for compressed data
-        if (compress_.compare("none") != 0) {
+        if (compress_type_.compare("none") != 0) {
           // Residual
           buf.residual[i] = NDArray(
             buf.merged.shape(), src[i].ctx(), false, buf.merged.dtype());
           buf.residual[i] = 0;
           // recv buffer and send buffer
-          int bits = compress_ == "2bit" ? 16 : 32;
+          int bits = compress_type_ == "2bit" ? 16 : 32;
           long int small_size = buf.merged.shape().Size() % bits == 0 ?
                                  buf.merged.shape().Size() / bits + 3 :
                                  buf.merged.shape().Size() / bits + 4;
@@ -542,7 +542,7 @@ class CommDevice : public Comm {
           buf.small_send_buf[i] = NDArray(
             TShape{small_size}, src[i].ctx(), false, buf.merged.dtype());
           // The positive and negative threshold
-          if (compress_.compare("2bit") == 0) {
+          if (compress_type_.compare("2bit") == 0) {
             pos_thre[i] = NDArray(
               TShape{1}, src[i].ctx(), false, buf.merged.dtype());
             pos_thre[i] = pos_threshold_;
@@ -556,7 +556,7 @@ class CommDevice : public Comm {
 
     for (size_t i = 0; i < src.size(); ++i) {
       // compress before copy
-      if (compress_.compare("2bit") == 0) {
+      if (compress_type_.compare("2bit") == 0) {
         // TODO: New code: wrapper for NDArray quantize_2bit op
         /*
         Compress2Bit(src[i], buf.residual[i],
@@ -570,10 +570,10 @@ class CommDevice : public Comm {
                        priority);
         */
         Quantize(src[i], &(buf.small_send_buf[i]), &(buf.residual[i]),
-                            pos_thre[i], neg_thre[i], compress_, priority);
+                            pos_thre[i], neg_thre[i], compress_type_, priority);
         CopyFromTo(buf.small_send_buf[i], &(buf.small_recv_buf[i]), priority);
-        Dequantize(buf.small_recv_buf[i], &(buf.copy_buf[i]), compress_, priority);
-      } else if (compress_.compare("1bit") == 0) {
+        Dequantize(buf.small_recv_buf[i], &(buf.copy_buf[i]), compress_type_, priority);
+      } else if (compress_type_.compare("1bit") == 0) {
         // TODO: New code: wrapper for NDArray quantize_1bit op
         /*
         Compress1Bit(src[i], buf.residual[i],

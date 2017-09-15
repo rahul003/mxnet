@@ -253,7 +253,7 @@ class KVStoreDist : public KVStoreLocal {
       }
     }
   }
-  
+
   void Push_(const std::vector<int>& keys,
              const std::vector<NDArray>& values,
              int priority,
@@ -269,7 +269,7 @@ class KVStoreDist : public KVStoreLocal {
       const auto& vals = grouped_vals[i];
       NDArray merged = do_merge ? comm_->Reduce(key, vals, priority) : vals[0];
 
-      auto& comm_buf = comm_buf_compr[key];
+      auto& comm_buf = comm_buf_compr_[key];
       // auto& send_buf = comm_buf_[key];
       const auto storage_type = merged.storage_type();
       if (merged.ctx().dev_mask() == cpu::kDevMask) {
@@ -277,7 +277,7 @@ class KVStoreDist : public KVStoreLocal {
         comm_buf.data.WaitToWrite();
         comm_buf.data = merged;  // avoid memory copy
       } else {
-        if (comm_buf.is_none()) {
+        if (!comm_buf.init) {
           if (storage_type == kDefaultStorage) {
             comm_buf.data = NDArray(merged.shape(), pinned_ctx_, true, merged.dtype());
           } else {
@@ -291,20 +291,21 @@ class KVStoreDist : public KVStoreLocal {
                                  merged.shape().Size() / bits + 4;
             comm_buf.residual = NDArray(merged.shape(), pinned_ctx_, false, merged.dtype());
             comm_buf.residual = 0;
-            comm_buf.compressed = NDArray(TShape{small_size}, pinned_ctx_, false, merged.dtype());
+            comm_buf.compressed = NDArray(TShape{compressed_size}, pinned_ctx_, false, merged.dtype());
 
             if (compress_type_.compare("2bit") == 0) {
-              pos_thre_arr_ = NDArray(TShape{1}, pinned_ctx_, false, buf.merged.dtype());
+              pos_thre_arr_ = NDArray(TShape{1}, pinned_ctx_, false, merged.dtype());
               pos_thre_arr_ = pos_threshold_;
-              neg_thre_arr_ = NDArray(TShape{1}, pinned_ctx_, false, buf.merged.dtype());
+              neg_thre_arr_ = NDArray(TShape{1}, pinned_ctx_, false, merged.dtype());
               neg_thre_arr_ = neg_threshold_;
             }
           }
+          comm_buf.init = true;
         }
         CopyFromTo(merged, &(comm_buf.data));
       }
 
-      NDArray& send_buf;
+      NDArray send_buf;
       //quantize
       if (compress_) {
         if (compress_type_.compare("2bit") == 0) {
@@ -578,9 +579,11 @@ class KVStoreDist : public KVStoreLocal {
     /// \brief the original value
     NDArray data;
     /// \brief the residual buffer
-    std::NDArray residual;
+    NDArray residual;
     /// \brief the small buffer for compressed data in sender
-    std::NDArray compressed;
+    NDArray compressed;
+    /// \brief whether initialized
+    bool init = false;
   };
   std::unordered_map<int, BufferEntry> comm_buf_compr_;
 
