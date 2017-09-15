@@ -70,7 +70,10 @@ class KVStore {
   inline void SetCompress(const std::string& compress,
                           const float pos_threshold,
                           const float neg_threshold) {
-    compress_ = compress;
+    compress_type_ = compress;
+    if (compress_type_.compare("none")!=0) {
+      compress_ = true;
+    }
     pos_threshold_ = pos_threshold;
     neg_threshold_ = neg_threshold;
   }
@@ -401,7 +404,9 @@ class KVStore {
   /**
    * \brief whether using low-bit compression
    */
-  std::string compress_ = "none";
+  std::string compress_type_ = "none";
+
+  bool compress_ = false;
 
   /**
    * \brief positive threshold
