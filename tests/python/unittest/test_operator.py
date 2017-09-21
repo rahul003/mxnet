@@ -893,10 +893,11 @@ def test_batchnorm_training():
             beta = np.ones(s)
             gamma[1] = 3
             beta[0] = 3
-
+	    print(data_tmp)
             rolling_mean = np.random.uniform(size=s)
             rolling_std = np.random.uniform(size=s)
-
+            print(rolling_mean)
+            print(rolling_std)
             data = mx.symbol.Variable('data', stype=stype)
             in_location = [mx.nd.array(data_tmp).tostype(stype), mx.nd.array(gamma).tostype(stype),
                            mx.nd.array(beta).tostype(stype)]
