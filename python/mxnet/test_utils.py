@@ -19,6 +19,7 @@
 # pylint: disable=too-many-lines
 from __future__ import absolute_import, print_function, division
 import time
+import pickle
 import gzip
 import struct
 import traceback
@@ -808,7 +809,11 @@ def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rto
         """
         # random_projection should not have elements too small,
         # otherwise too much precision is lost in numerical gradient
-        plain = _rng.rand(*shape) + 0.1
+        #plain = _rng.rand(*shape) + 0.1
+        #print('project matrix')
+        #print(plain)
+        plain = np.array([[[[ 1.08638242,0.56417228],[ 0.87289977,0.20439213]],[[ 1.05770397,0.59018026],[ 0.27269412,0.54180449]],[[ 0.72418102,0.89063007],[ 0.82465786,0.31650403]]],[[[ 0.46155026,0.5963228 ],[ 0.3224153,0.39861413]],[[ 0.3214724,0.18116414],[ 0.93470868,0.1856888 ]],[[ 0.42946642,1.04903208],[ 0.36165658,0.30361473]]]])
+        #plain = np.array([[[[ 0.73940294,0.28513131],[ 1.04177367,1.0556845 ]],[[ 0.60635233,0.45350347],[ 0.94453292,0.43643034]],[[ 0.74456322,0.16554625],[ 1.0119915,0.25267912]]],[[[ 0.51310362,0.52634561],[ 0.31740987,0.98324215]],[[ 0.78842111,0.15905102],[ 0.76894983,0.8079662 ]],[[ 0.91553723,0.76397728],[ 0.29263716,0.56087584]]]])
         return plain
 
     location = _parse_location(sym=sym, location=location, ctx=ctx, dtype=dtype)
@@ -840,8 +845,55 @@ def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rto
     location = dict(list(location.items()) +
                     [("__random_proj", mx.nd.array(random_projection(out_shape[0]),
                                                    ctx=ctx, dtype=dtype))])
+    #print(location)
+    #print('that was location')   
     args_grad_npy = dict([(k, _rng.normal(0, 0.01, size=location[k].shape)) for k in grad_nodes]
                          + [("__random_proj", _rng.normal(0, 0.01, size=out_shape[0]))])
+    args_grad_npy['__random_proj']=np.array([[[[ -1.90395085e-03,   9.45161303e-05],
+         [  4.52657155e-03,   9.45033068e-03]],
+
+        [[  1.35008896e-02,   3.32625691e-03],
+         [  6.45947265e-03,   1.61568862e-02]],
+
+        [[ -1.68433475e-02,   4.51060351e-05],
+         [ -9.01685237e-03,  -2.32020054e-02]]],
+
+
+       [[[  8.98750546e-03,  -6.16790491e-03],
+         [  6.21665702e-03,   4.58118971e-03]],
+
+        [[  1.00112144e-02,   7.10570330e-03],
+         [ -9.47092911e-03,   1.16360908e-03]],
+
+        [[  9.43188669e-03,  -3.24793837e-04],
+         [  3.49572499e-03,   1.60367399e-02]]]])
+    args_grad_npy['data']=np.array([[[[-0.00025838,  0.01114473],
+         [-0.00473817, -0.00338836]],
+
+        [[ 0.01479203, -0.01537182],
+         [ 0.00036836, -0.00347349]],
+
+        [[-0.00447809, -0.01230535],
+         [ 0.01448044,  0.01459663]]],
+
+
+       [[[ 0.00969493, -0.01350383],
+         [-0.00516244,  0.00292467]],
+
+        [[ 0.01956085,  0.01595833],
+         [ 0.0006086 , -0.00524943]],
+
+        [[-0.0056578 ,  0.00224471],
+         [-0.00926852,  0.00931985]]]])
+    for key in args_grad_npy:
+        if key.endswith('gamma'):
+            args_grad_npy[key] = np.array([ 0.01220218, -0.00649507,  0.01201363])
+        if key.endswith('beta'):
+            args_grad_npy[key] = np.array([ 0.00621224,  0.01071717,  0.00392615])
+   # args_grad_npy['batchnorm_v128_gamma']=np.array([ 0.01220218, -0.00649507,  0.01201363])
+   # args_grad_npy['batchnorm_v128_beta']=np.array([ 0.00621224,  0.01071717,  0.00392615])
+    print(args_grad_npy)
+    assert(len(args_grad_npy)==4)
 
     args_grad = {k: mx.nd.array(v, ctx=ctx, dtype=dtype) for k, v in args_grad_npy.items()}
     if grad_stype_dict is not None:
@@ -852,7 +904,7 @@ def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rto
                 # if the symbolic grad is expected to be zero, it should not be initialized at all
                 args_grad[k] = mx.nd.zeros(args_grad[k].shape, args_grad[k].context,
                                            args_grad[k].dtype, v)
-
+    #print(args_grad)
     executor = out.bind(ctx, grad_req=grad_req,
                         args=location, args_grad=args_grad, aux_states=aux_states)
 
