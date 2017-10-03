@@ -729,6 +729,7 @@ def numeric_grad(executor, location, aux_states=None, eps=1e-4,
         stype = executor.arg_dict[k].stype
         old_value = v.copy()
         for i in range(np.prod(v.shape)):
+            #print('i',i)
             # inplace update
             v.ravel()[i] += eps/2.0
             executor.arg_dict[k][:] = as_stype(v, stype, dtype=dtype)
@@ -737,7 +738,8 @@ def numeric_grad(executor, location, aux_states=None, eps=1e-4,
                     executor.aux_dict[key][:] = val
             executor.forward(is_train=use_forward_train)
             f_peps = executor.outputs[0].asnumpy()
-
+            #print('fpeps',f_peps)
+            #print('v is ',v)
             v.ravel()[i] -= eps
             executor.arg_dict[k][:] = as_stype(v, stype, dtype=dtype)
             if aux_states is not None:
@@ -746,14 +748,60 @@ def numeric_grad(executor, location, aux_states=None, eps=1e-4,
                     executor.aux_dict[key][:] = as_stype(val, adstype, dtype=dtype)
             executor.forward(is_train=use_forward_train)
             f_neps = executor.outputs[0].asnumpy()
-
+            #print('------------------')
+            #print('f_neps',f_neps)
+            #print('v is ',v)
+            
             approx_grad = (f_peps - f_neps).sum() / eps
+            #print('approx_grad', approx_grad)
             approx_grads[k].ravel()[i] = approx_grad
             v.ravel()[i] = old_value.ravel()[i]
+            if (i==22):
+                plot(old_value, i, k, executor, stype, dtype, aux_states, use_forward_train)
         # copy back the original value
         executor.arg_dict[k][:] = as_stype(old_value, stype, dtype=dtype)
 
     return approx_grads
+
+def plot(v, i, k, executor, stype, dtype, aux_states, use_forward_train):
+    #def as_stype(var, stype, dtype):
+    #    return mx.nd.cast_storage(mx.nd.array(var, dtype=dtype), stype=stype)
+    eps = 0.00001	
+    origval = v.ravel()[i]
+    #prev = None
+    while eps<0.1:
+
+#    for eps in [0.00001,0.0001,0.0005,0.001,0.005,0.01,0.05,0.1]:
+        f = [None, None]
+        for s in [-1, 1]:
+            arg = origval + s*eps
+            v.ravel()[i] = arg
+            executor.arg_dict[k][:] = mx.nd.cast_storage(mx.nd.array(v, dtype=dtype), stype=stype)
+            if aux_states is not None:
+                for key, val in aux_states.items():
+                   executor.aux_dict[key][:] = val
+            executor.forward(is_train=use_forward_train)
+            if s==-1: 
+                f[0] = executor.outputs[0].asnumpy().ravel()
+            else:
+                f[1] = executor.outputs[0].asnumpy().ravel()
+        square_diff(eps, f[0], f[1])
+        eps = eps*2
+        #print ('fx', fx)
+        #print ('at i', arg , fx.ravel()[i])
+        #if prev is not None:
+        #    square_diff(arg, fx.ravel(), prev)
+        #prev = fx.ravel()
+
+def square_diff(x, a, b):
+    #print(a.ravel(), b.ravel())
+    s = 0
+    for i in range(a.size):
+        s += (a[i]-b[i])*(a[i]-b[i])
+    #print(diff)
+    #sqdiff = np.square(diff)
+    #s = sqdiff.sum()
+    print ('at eps', x, 'sum is ',s)
 
 
 def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rtol=1e-2,
@@ -921,7 +969,7 @@ def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rto
     numeric_gradients = numeric_grad(
         executor, location_npy, aux_states_npy,
         eps=numeric_eps, use_forward_train=use_forward_train, dtype=dtype)
-
+    print ('symb grad', symbolic_grads)
     for name in grad_nodes:
         fd_grad = numeric_gradients[name]
         orig_grad = args_grad_npy[name]
