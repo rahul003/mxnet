@@ -1,4 +1,4 @@
-# Licensed to the Apache Software Foundation (ASF) under one
+#/ Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -766,42 +766,47 @@ def numeric_grad(executor, location, aux_states=None, eps=1e-4,
 def plot(v, i, k, executor, stype, dtype, aux_states, use_forward_train):
     #def as_stype(var, stype, dtype):
     #    return mx.nd.cast_storage(mx.nd.array(var, dtype=dtype), stype=stype)
-    eps = 0.00001	
+    #eps = 0.00001	
     origval = v.ravel()[i]
+    executor.arg_dict[k][:] = mx.nd.cast_storage(mx.nd.array(v, dtype=dtype), stype=stype)
+    if aux_states is not None:
+        for key, val in aux_states.items():
+            executor.aux_dict[key][:]  = val
+    executor.forward(is_train = use_forward_train)
+    fx = executor.outputs[0].asnumpy().ravel()
     #prev = None
-    while eps<0.1:
-
-#    for eps in [0.00001,0.0001,0.0005,0.001,0.005,0.01,0.05,0.1]:
-        f = [None, None]
-        for s in [-1, 1]:
-            arg = origval + s*eps
+    #while eps<0.1:
+    for eps in np.linspace(-0.01,0.01,num=100):#0.00001,0.0001,0.0005,0.001,0.005,0.01,0.05,0.1]:
+        #f = [None, None]
+        for s in [1]:
+            arg = origval + eps
             v.ravel()[i] = arg
             executor.arg_dict[k][:] = mx.nd.cast_storage(mx.nd.array(v, dtype=dtype), stype=stype)
             if aux_states is not None:
                 for key, val in aux_states.items():
                    executor.aux_dict[key][:] = val
             executor.forward(is_train=use_forward_train)
-            if s==-1: 
-                f[0] = executor.outputs[0].asnumpy().ravel()
-            else:
-                f[1] = executor.outputs[0].asnumpy().ravel()
-        square_diff(eps, f[0], f[1])
-        eps = eps*2
+            #if s==-1: 
+               # f[0] = executor.outputs[0].asnumpy().ravel()
+            #else:
+            f = executor.outputs[0].asnumpy().ravel()
+        square_diff(arg,eps,f, fx)
+        #eps = eps*2
         #print ('fx', fx)
         #print ('at i', arg , fx.ravel()[i])
         #if prev is not None:
         #    square_diff(arg, fx.ravel(), prev)
         #prev = fx.ravel()
 
-def square_diff(x, a, b):
+def square_diff(arg, eps, a, b):
     #print(a.ravel(), b.ravel())
     s = 0
     for i in range(a.size):
-        s += (a[i]-b[i])*(a[i]-b[i])
+        s += (a[i]-b[i])#*(a[i]-b[i])
     #print(diff)
     #sqdiff = np.square(diff)
     #s = sqdiff.sum()
-    print ('at eps', x, 'sum is ',s)
+    print (arg,' ', eps, ' ',s)
 
 
 def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rtol=1e-2,
