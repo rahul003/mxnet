@@ -101,6 +101,7 @@ echo ${libs} | sed -e 's/,/ /g' | xargs md5sum
 def cpp_ut(docker_type) {
   timeout(time: max_time, unit: 'MINUTES') {
     sh "${docker_run} ${docker_type} ./build/tests/cpp/mxnet_test"
+    echo 'test ended'
   }
 }
 
