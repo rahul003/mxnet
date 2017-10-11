@@ -24,7 +24,7 @@ import pickle
 from .ndarray import NDArray
 from .ndarray import _ndarray_cls
 from .base import _LIB
-from .base import check_call, c_array, c_str, string_types, mx_uint, mx_float, py_str
+from .base import check_call, c_array, c_str, string_types, numeric_types, mx_uint, mx_float, py_str
 from .base import NDArrayHandle, KVStoreHandle
 from . import optimizer as opt
 
@@ -141,7 +141,7 @@ class KVStore(object):
 
         This function returns immediately after adding an operator to the engine.
         The actual operation is executed asynchronously after all previous `push`
-        and `pull` calls for the same input key(s) are finished.
+        for the same input key(s) are finished.
         There is no synchronization between workers. One can use ``_barrier()``
         to sync all workers.
 
@@ -346,19 +346,40 @@ class KVStore(object):
                 self.handle, mx_uint(len(ckeys)), ckeys, cvals, crow_ids, ctypes.c_int(priority)))
 
 
-    def set_compress(self, compress='none',
-                     pos_threshold=0.1,
-                     neg_threshold=-0.1):
+    def set_compress(self, compress_params={}):
         """ Set to use low-bit compression
 
         compress can be 'none', '2bit', or '1bit'.
         """
-        if not isinstance(compress, string_types):
+        if 'compress' not in compress_params:
+            compress_params['compress'] = 'none'
+        elif not isinstance(compress_params['compress'], string_types):
             raise TypeError('compress must be a string')
-        check_call(_LIB.MXKVStoreSetCompress(self.handle,
-                                             c_str(compress),
-                                             mx_float(pos_threshold),
-                                             mx_float(neg_threshold)))
+        elif compress_params['compress'] not in ['none','2bit']:
+            raise ValueError('Unsupported type of compression')
+
+        if compress_params['compress'] == '2bit':
+            if 'pos_threshold' in compress_params:
+                if not isinstance(compress_params['pos_threshold'], numeric_types):
+                    raise TypeError('pos_threshold must be a numeric type')
+            else:
+                compress_params['pos_threshold'] = 0.1
+
+            if 'neg_threshold' in compress_params:
+                if not isinstance(compress_params['neg_threshold'], numeric_types):
+                    raise TypeError('neg_threshold must be a numeric type')
+            else:
+                compress_params['neg_threshold'] = -0.1
+
+            if (compress_params['pos_threshold'] <= 0 or compress_params['neg_threshold'] >= 0):
+                raise ValueError('pos_threshold needs to be greater than 0, \
+                                 and neg_threshold needs to be less than 0')
+
+        if compress_params['compress'] == '2bit':
+            check_call(_LIB.MXKVStoreSetCompress(self.handle,
+                                             c_str(compress_params['compress']),
+                                             mx_float(compress_params['pos_threshold']),
+                                             mx_float(compress_params['neg_threshold'])))
 
     def set_optimizer(self, optimizer):
         """ Registers an optimizer with the kvstore.

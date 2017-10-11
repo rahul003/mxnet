@@ -24,9 +24,9 @@ import logging
 import warnings
 import numpy
 from .base import py_str
-from .ndarray import (NDArray, zeros, clip, sqrt, sign, array, maximum, abs as NDabs)
+from .ndarray import (NDArray, zeros, clip, sqrt, cast, maximum, abs as NDabs)
 from .ndarray import (sgd_update, sgd_mom_update, adam_update, rmsprop_update, rmspropalex_update,
-                      mp_sgd_update, mp_sgd_mom_update)
+                      mp_sgd_update, mp_sgd_mom_update, ftrl_update)
 from .random import normal
 
 
@@ -61,6 +61,12 @@ class Optimizer(object):
     begin_num_update : int, optional
         The initial number of updates.
 
+    multi_precision : bool, optional
+       Flag to control the internal precision of the optimizer.
+       ``False`` results in using the same precision as the weights (default),
+       ``True`` makes internal 32-bit copy of the weights and applies gradients
+                in 32-bit precision even if actual weights used in the model have lower precision.
+                Turning this on can improve convergence and accuracy when training with float16.
 
     Properties
     ----------
@@ -71,7 +77,7 @@ class Optimizer(object):
     def __init__(self, rescale_grad=1., param_idx2name=None, wd=0.,
                  clip_gradient=None, learning_rate=0.01,
                  lr_scheduler=None, sym=None, begin_num_update=0,
-                 param_dict=None):
+                 multi_precision=False, param_dict=None):
         self.rescale_grad = rescale_grad
         self.lr = learning_rate
         self.lr_scheduler = lr_scheduler
@@ -85,6 +91,7 @@ class Optimizer(object):
         self.num_update = begin_num_update
         self._index_update_count = {}
         self.clip_gradient = clip_gradient
+        self.multi_precision = multi_precision
 
         if param_idx2name is None:
             param_idx2name = {}
@@ -189,6 +196,36 @@ class Optimizer(object):
             The state associated with the weight.
         """
 
+    def create_state_multi_precision(self, index, weight):
+        """Creates auxiliary state for a given weight, including FP32 high
+        precision copy if original weight is FP16.
+
+        This method is provided to perform automatic mixed precision training
+        for optimizers that do not support it themselves.
+
+        Parameters
+        ----------
+        index : int
+            An unique index to identify the weight.
+        weight : NDArray
+            The weight.
+
+        Returns
+        -------
+        state : any obj
+            The state associated with the weight.
+        """
+        weight_master_copy = None
+        if self.multi_precision and weight.dtype == numpy.float16:
+            weight_master_copy = weight.astype(numpy.float32)
+            return (weight_master_copy,) + (self.create_state(index, weight_master_copy),)
+        if weight.dtype == numpy.float16 and not self.multi_precision:
+            warnings.warn("Accumulating with float16 in optimizer can lead to "
+                          "poor accuracy or slow convergence. "
+                          "Consider using multi_precision=True option of the "
+                          "optimizer")
+        return self.create_state(index, weight)
+
     def update(self, index, weight, grad, state):
         """Updates the given parameter using the corresponding gradient and state.
 
@@ -206,6 +243,33 @@ class Optimizer(object):
             The state returned by `create_state()`.
         """
         raise NotImplementedError()
+
+    def update_multi_precision(self, index, weight, grad, state):
+        """Updates the given parameter using the corresponding gradient and state.
+        Mixed precision version.
+
+        Parameters
+        ----------
+        index : int
+            The unique index of the parameter into the individual learning
+            rates and weight decays. Learning rates and weight decay
+            may be set via `set_lr_mult()` and `set_wd_mult()`, respectively.
+        weight : NDArray
+            The parameter to be updated.
+        grad : NDArray
+            The gradient of the objective with respect to this parameter.
+        state : any obj
+            The state returned by `create_state()`.
+        """
+        if self.multi_precision and weight.dtype == numpy.float16:
+            # Wrapper for mixed precision
+            weight_master_copy = state[0]
+            original_state = state[1]
+            grad32 = grad.astype(numpy.float32)
+            self.update(index, weight_master_copy, grad32, original_state)
+            cast(weight_master_copy, dtype=weight.dtype, out=weight)
+        else:
+            self.update(index, weight, grad, state)
 
     def set_learning_rate(self, lr):
         """Sets a new learning rate of the optimizer.
@@ -395,34 +459,33 @@ class SGD(Optimizer):
     multi_precision: bool, optional
        Flag to control the internal precision of the optimizer.
        ``False`` results in using the same precision as the weights (default),
-       ``True`` makes internal 32-bit copy of the weights and applies gradients
-                in 32-bit precision even if actual weights used in the model have lower precision.
+       ``True`` makes internal 32-bit copy of the weights and applies gradients \
+                in 32-bit precision even if actual weights used in the model have lower precision.\
                 Turning this on can improve convergence and accuracy when training with float16.
     """
-    def __init__(self, momentum=0.0, multi_precision=False, **kwargs):
+    def __init__(self, momentum=0.0, **kwargs):
         super(SGD, self).__init__(**kwargs)
         self.momentum = momentum
-        self.multi_precision = multi_precision
 
-    def create_state(self, index, weight):
-        momentum = None
+    def create_state_multi_precision(self, index, weight):
         weight_master_copy = None
         if self.multi_precision and weight.dtype == numpy.float16:
-            weight_master_copy = array(weight, ctx=weight.context, dtype=numpy.float32)
-            if self.momentum != 0.0:
-                momentum = zeros(weight.shape, weight.context, dtype=numpy.float32,
-                                 stype=weight.stype)
-            return (momentum, weight_master_copy)
+            weight_master_copy = weight.astype(numpy.float32)
+            return (self.create_state(index, weight_master_copy), weight_master_copy)
         if weight.dtype == numpy.float16 and not self.multi_precision:
             warnings.warn("Accumulating with float16 in optimizer can lead to "
                           "poor accuracy or slow convergence. "
                           "Consider using multi_precision=True option of the "
                           "SGD optimizer")
+        return self.create_state(index, weight)
+
+    def create_state(self, index, weight):
+        momentum = None
         if self.momentum != 0.0:
             momentum = zeros(weight.shape, weight.context, dtype=weight.dtype, stype=weight.stype)
         return momentum
 
-    def update(self, index, weight, grad, state):
+    def _update_impl(self, index, weight, grad, state, multi_precision=False):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
@@ -434,9 +497,8 @@ class SGD(Optimizer):
             kwargs['momentum'] = self.momentum
         if self.clip_gradient:
             kwargs['clip_gradient'] = self.clip_gradient
-        use_multi_precision = isinstance(state, (list, tuple))
 
-        if not use_multi_precision:
+        if not multi_precision:
             if state is not None:
                 sgd_mom_update(weight, grad, state, out=weight,
                                lr=lr, wd=wd, **kwargs)
@@ -450,6 +512,14 @@ class SGD(Optimizer):
             else:
                 mp_sgd_update(weight, grad, state[1], out=weight,
                               lr=lr, wd=wd, **kwargs)
+
+    def update(self, index, weight, grad, state):
+        self._update_impl(index, weight, grad, state, multi_precision=False)
+
+    def update_multi_precision(self, index, weight, grad, state):
+        use_multi_precision = self.multi_precision and weight.dtype == numpy.float16
+        self._update_impl(index, weight, grad, state,
+                          multi_precision=use_multi_precision)
 
 # pylint: enable=line-too-long
 @register
@@ -812,12 +882,38 @@ class AdaDelta(Optimizer):
         weight[:] -= current_delta + wd * weight
 
 #pylint: disable=invalid-name
+#pylint: disable=line-too-long
 @register
 class Ftrl(Optimizer):
     """The Ftrl optimizer.
 
     Referenced from *Ad Click Prediction: a View from the Trenches*, available at
     http://dl.acm.org/citation.cfm?id=2488200.
+
+    eta :
+        .. math::
+           \\eta_{t,i} = \\frac{learningrate}{\\beta+\\sqrt{\\sum_{s=1}^tg_{s,i}^2}}
+
+    The optimizer updates the weight by::
+
+        rescaled_grad = clip(grad * rescale_grad, clip_gradient)
+        z += rescaled_grad - (sqrt(n + rescaled_grad**2) - sqrt(n)) * weight / learning_rate
+        n += rescaled_grad**2
+        w = (sign(z) * lamda1 - z) / ((beta + sqrt(n)) / learning_rate + wd) * (abs(z) > lamda1)
+
+    If the storage types of weight, state and grad are all ``row_sparse``, \
+    sparse updates are applied by::
+
+        for row in grad.indices:
+            rescaled_grad[row] = clip(grad[row] * rescale_grad, clip_gradient)
+            z[row] += rescaled_grad[row] - (sqrt(n[row] + rescaled_grad[row]**2) - sqrt(n[row])) * weight[row] / learning_rate
+            n[row] += rescaled_grad[row]**2
+            w[row] = (sign(z[row]) * lamda1 - z[row]) / ((beta + sqrt(n[row])) / learning_rate + wd) * (abs(z[row]) > lamda1)
+
+    For details of the update algorithm, see :class:`~mxnet.ndarray.ftrl_update`.
+
+    This optimizer accepts the following parameters in addition to those accepted
+    by :class:`.Optimizer`.
 
     Parameters
     ----------
@@ -827,9 +923,6 @@ class Ftrl(Optimizer):
         The initial learning rate.
     beta : float, optional
         Per-coordinate learning rate correlation parameter.
-    eta :
-        .. math::
-           \\eta_{t,i} = \\frac{learningrate}{\\beta+\\sqrt{\\sum_{s=1}^tg_{s,i}^t}}
     """
 
     def __init__(self, lamda1=0.01, learning_rate=0.1, beta=1, **kwargs):
@@ -839,8 +932,8 @@ class Ftrl(Optimizer):
         self.lr = learning_rate
 
     def create_state(self, index, weight):
-        return (zeros(weight.shape, weight.context),  # dn
-                zeros(weight.shape, weight.context))  # n
+        return (zeros(weight.shape, weight.context, stype=weight.stype),  # z
+                zeros(weight.shape, weight.context, stype=weight.stype))  # n
 
     def update(self, index, weight, grad, state):
         assert(isinstance(weight, NDArray))
@@ -849,22 +942,16 @@ class Ftrl(Optimizer):
         wd = self._get_wd(index)
         lr = self._get_lr(index)
 
-        # preprocess grad
-        grad *= self.rescale_grad
-        if self.clip_gradient is not None:
-            grad = clip(grad, -self.clip_gradient, self.clip_gradient)
+        kwargs = {'lamda1': self.lamda1, 'beta': self.beta, 'rescale_grad': self.rescale_grad}
+        if self.clip_gradient:
+            kwargs['clip_gradient'] = self.clip_gradient
 
         # accumulated g and delta initialization
-        dn, n = state
+        z, n = state
+        ftrl_update(weight, grad, z, n, out=weight,
+                    lr=lr, wd=wd, **kwargs)
 
-        #update dn, n
-        dn += grad - (sqrt(n + grad * grad) - sqrt(n)) * weight / lr
-        n += grad * grad
-
-        # update weight
-        weight[:] = (sign(dn) * self.lamda1 - dn) / \
-                    ((self.beta + sqrt(n)) / lr + wd) * (NDabs(dn) > self.lamda1)
-
+# pylint: enable=line-too-long
 @register
 class Adamax(Optimizer):
     """The AdaMax optimizer.
@@ -1013,13 +1100,13 @@ class Updater(object):
         if isinstance(index, bytes):
             index = py_str(index)
         if index not in self.states:
-            self.states[index] = self.optimizer.create_state(index, weight)
+            self.states[index] = self.optimizer.create_state_multi_precision(index, weight)
             self.states_synced[index] = True
         elif not self.states_synced[index]:
             self.states[index] = \
                 self.sync_state_context(self.states[index], weight.context)
             self.states_synced[index] = True
-        self.optimizer.update(index, weight, grad, self.states[index])
+        self.optimizer.update_multi_precision(index, weight, grad, self.states[index])
 
     def sync_state_context(self, state, context):
         if isinstance(state, NDArray):

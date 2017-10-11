@@ -36,11 +36,14 @@ rsp_keys = ['9', '11', '13']
 rate = 2
 shape = (2, 3)
 big_shape = (1200, 1200)        # bigger than BIGARRAY_BOUND
-
+irregular_shape = (1211,1211)
 
 def init_kv():
     kv = mx.kv.create('dist_sync')
     # init kv dns keys
+    # kv.init('1221', mx.nd.zeros(big_shape))
+    # kv.init('12221', mx.nd.zeros(irregular_shape))
+    # kv.init('121', mx.nd.zeros(shape))
     kv.init(keys, [mx.nd.ones(shape)] * len(keys))
     kv.init('99', mx.nd.ones(big_shape))
     # init kv row_sparse keys
@@ -53,18 +56,31 @@ def init_kv():
     kv.set_optimizer(mx.optimizer.create('test', rescale_grad=rate))
     return kv, my_rank, nworker
 
+def init_kv_compressed(kv):
+    pos_threshold = 0.5
+    neg_threshold = -0.5
+    kv.set_compress({'compress': '2bit', 'pos_threshold': pos_threshold, 'neg_threshold': neg_threshold})
+    #kv.set_optimizer(mx.optimizer.create('test'))
+    # init kv compression keys
+    kv.init('221', mx.nd.zeros(big_shape))
+    kv.init('2221', mx.nd.zeros(irregular_shape))
+    kv.init('21', mx.nd.zeros(shape))
+    #kv.set_optimizer(mx.optimizer.create('test'))
+    return kv, pos_threshold, neg_threshold
+
 def test_sync_push_pull():
     kv, my_rank, nworker = init_kv()
+
     def check_default_keys(kv, my_rank, nworker):
-        nrepeat = 3
+        nrepeat = 1
         for i in range(nrepeat):
-            kv.push('3', mx.nd.ones(shape)*(my_rank+1))
+            # kv.push('3', mx.nd.ones(shape)*(my_rank+1))
             kv.push('99', mx.nd.ones(big_shape)*(my_rank+1))
 
         num = (nworker + 1) * nworker * rate / 2 * nrepeat + 1
-        val = mx.nd.zeros(shape)
-        kv.pull('3', out=val)
-        check_diff_to_scalar(val, num)
+        # val = mx.nd.zeros(shape)
+        # kv.pull('3', out=val)
+        # check_diff_to_scalar(val, num)
 
         val2 = mx.nd.zeros(big_shape)
         kv.pull('99', out=val2)
@@ -166,11 +182,63 @@ def test_sync_push_pull():
             expected[row] = updated_val[row]
         check_diff_to_scalar(val, expected, rank=my_rank)
 
-    check_default_keys(kv, my_rank, nworker)
-    check_row_sparse_keys(kv, my_rank, nworker)
-    check_row_sparse_keys_with_zeros(kv, my_rank, nworker)
-    check_big_row_sparse_keys(kv, my_rank, nworker)
-    print('worker ' + str(my_rank) + ' is done')
+    def verify_residual(kv, pos_threshold, nworker):
+        for d in [('2221',irregular_shape),('221', big_shape), ('21', shape)]:
+            kv.push(d[0], mx.nd.ones(d[1])*0.4)
+            val=mx.nd.zeros(d[1])
+            kv.pull(d[0],val)
+            check_diff_to_scalar(val, 0)
+            kv.push(d[0], mx.nd.ones(d[1])*(pos_threshold - 0.4))
+            val2 = mx.nd.zeros(d[1])
+            kv.pull(d[0],val2)
+            curval = pos_threshold * rate * nworker
+            check_diff_to_scalar(val2, curval)
+            kv.push(d[0], mx.nd.ones(d[1])*0.2)
+            val3= mx.nd.zeros(d[1])
+            kv.pull(d[0], val3)
+            check_diff_to_scalar(val3, curval)
+            kv.push(d[0], mx.nd.ones(d[1])*(pos_threshold-0.2))
+            val4 = mx.nd.zeros(d[1])
+            kv.pull(d[0],val4)
+            curval += pos_threshold*rate*nworker
+            check_diff_to_scalar(val4, curval)
+
+    def check_ones(kv, pos, nworker):
+        val = mx.nd.zeros(big_shape)
+        kv.pull('221', val)
+        curval = val[0][0].asnumpy()[0]
+        kv.push('221',mx.nd.ones(big_shape)*pos*4)
+        val2 = mx.nd.zeros(big_shape)
+        kv.pull('221', val2)
+        newval = curval + rate*nworker*pos
+        check_diff_to_scalar(val2, newval)
+
+    def check_pull_before_push(kv):
+        val = mx.nd.ones(irregular_shape)
+        kv.pull('2221', val)
+        check_diff_to_scalar(val, 0)
+
+    def check_zero(kv):
+        kv.push('221', mx.nd.zeros(big_shape))
+        # to check that all are set to 0s
+        val = mx.nd.ones(big_shape)
+        kv.pull('221', val)
+        check_diff_to_scalar(val, 0)
+
+
+    # print ('worker '+str(my_rank)+' started')
+    # check_default_keys(kv, my_rank, nworker)
+    # check_row_sparse_keys(kv, my_rank, nworker)
+    # check_row_sparse_keys_with_zeros(kv, my_rank, nworker)
+    # check_big_row_sparse_keys(kv, my_rank, nworker)
+    # print('worker ' + str(my_rank) + ' is done with non compression tests')
+
+    kv, pos, neg = init_kv_compressed(kv)
+    check_pull_before_push(kv)
+    check_zero(kv)
+    verify_residual(kv, pos, nworker)
+    check_ones(kv, pos, nworker)
+    print('worker ' + str(my_rank) + ' is done with compression tests')
 
 if __name__ == "__main__":
     test_sync_push_pull()

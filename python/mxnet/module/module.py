@@ -421,7 +421,7 @@ class Module(BaseModule):
             assert isinstance(shared_module, Module) and \
                     shared_module.binded and shared_module.params_initialized
             shared_group = shared_module._exec_group
-            assert len(shared_group.execs) == len(self._context)
+            assert len(shared_group.execs) >= len(self._context)
         else:
             shared_group = None
 
@@ -502,7 +502,7 @@ class Module(BaseModule):
             self._sync_params_from_devices()
 
         (kvstore, update_on_kvstore) = \
-                _create_kvstore(kvstore, len(self._context), self._arg_params)
+                _create_kvstore(kvstore, len(self._context), self._arg_params, '2bit')
 
         batch_size = self._exec_group.batch_size
         if kvstore and 'dist' in kvstore.type and '_sync' in kvstore.type:
@@ -539,6 +539,7 @@ class Module(BaseModule):
         self._updater = None
 
         if kvstore:
+            kvstore.set_compress(self._compress_params)
             # copy initialized local parameters to kvstore
             _initialize_kvstore(kvstore=kvstore,
                                 param_arrays=self._exec_group.param_arrays,

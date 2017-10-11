@@ -113,8 +113,7 @@ def fit(args, network, data_loader, **kwargs):
     data_loader : function that returns the train and val data iterators
     """
     # kvstore
-    kv = mx.kvstore.create(args.kv_store)
-
+    kv = mx.kvstore.create(args.kv_store, '2bit')
     # logging
     head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
     logging.basicConfig(level=logging.DEBUG, format=head)
@@ -164,11 +163,8 @@ def fit(args, network, data_loader, **kwargs):
     optimizer_params = {
             'learning_rate': lr,
             'wd' : args.wd,
-            'lr_scheduler': lr_scheduler}
-
-    # Add 'multi_precision' parameter only for SGD optimizer
-    if args.optimizer == 'sgd':
-        optimizer_params['multi_precision'] = True
+            'lr_scheduler': lr_scheduler,
+            'multi_precision': True}
 
     # Only a limited number of optimizers have 'momentum' property
     has_momentum = {'sgd', 'dcasgd', 'nag'}

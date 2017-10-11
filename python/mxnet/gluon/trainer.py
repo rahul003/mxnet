@@ -18,6 +18,7 @@
 # coding: utf-8
 # pylint: disable=
 """Parameter optimizer."""
+__all__ = ['Trainer']
 
 from .. import optimizer as opt
 from ..model import _create_kvstore
@@ -49,7 +50,7 @@ class Trainer(object):
         positive threshold used in 2bit compression.
     neg_threshold:
         negative threshold used in 2bit compression.
-        
+
     Properties
     ----------
     learning_rate: float
@@ -57,7 +58,7 @@ class Trainer(object):
         optimizer, its learning rate can be accessed as optimizer.learning_rate.
     """
     def __init__(self, params, optimizer, optimizer_params=None, kvstore='device',
-                 compress='none', pos_threshold=0.1, neg_threshold=-0.1):
+                 compress_params=None):
         if isinstance(params, (dict, ParameterDict)):
             params = list(params.values())
         if not isinstance(params, (list, tuple)):
@@ -71,23 +72,21 @@ class Trainer(object):
                     "First argument must be a list or dict of Parameters, " \
                     "got list of %s."%(type(param)))
             self._params.append(param)
-        if (compress != 'none' and
-            compress != '2bit' and compress != '1bit'):
-           raise ValueError("The compress argument can only be 'none', "  \
+        if compress_params and compress_params.compress != 'none':
+            if (compress_params.compress != '2bit' and compress_params.compress != '1bit'):
+                raise ValueError("The compress argument can only be 'none', "  \
                             "'2bit', or '1bit'.")
-        if (compress == '2bit' and
-            (pos_threshold <= 0 or neg_threshold >= 0)):
-           raise ValueError("The pos_threshold must be greater than 0, and " \
+            if (compress_params.compress == '2bit'
+                and (compress_params.pos_threshold <= 0 or compress_params.neg_threshold >= 0)):
+                raise ValueError("The pos_threshold must be greater than 0, and " \
                             "the neg_threshold must be less than 0.")
+        self._compress_params = compress_params if compress_params else {'compress':'none'}
         optimizer_params = optimizer_params if optimizer_params else {}
         self._scale = optimizer_params.get('rescale_grad', 1.0)
         self._contexts = self._check_contexts()
         self._init_optimizer(optimizer, optimizer_params)
         self._kv_initialized = False
         self._kvstore = kvstore
-        self._compress = compress
-        self._pos_threshold = pos_threshold
-        self._neg_threshold = neg_threshold
 
     def _check_contexts(self):
         contexts = None
@@ -121,9 +120,7 @@ class Trainer(object):
                                                      len(self._contexts),
                                                      arg_arrays)
         if kvstore:
-            kvstore.set_compress(self._compress,
-                                 self._pos_threshold,
-                                 self._neg_threshold)
+            kvstore.set_compress(self._compress_params)
             if 'dist' in kvstore.type:
                 update_on_kvstore = False
             for i, param in enumerate(self._params):

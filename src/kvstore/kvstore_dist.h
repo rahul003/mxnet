@@ -26,12 +26,14 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <bitset>
 #include <utility>
 #include "./kvstore_local.h"
 #include "mxnet/engine.h"
 #include "ps/ps.h"
 #include "./kvstore_dist_server.h"
 #include "../ndarray/ndarray_function.h"
+#include <inttypes.h> // for uint32_t
 #if MKL_EXPERIMENTAL == 1
 #include <mkl_memory.h>
 #include "../operator/mkl/mkl_memory-inl.h"
@@ -50,13 +52,34 @@ namespace kvstore {
  * it's the server node's job to control the data consistency among all
  * workers. see details on \ref ServerHandle::Start
  */
-class KVStoreDist : public KVStoreLocal {
+
+  void floatToBinary(float f, std::string& str)
+  {
+    union { float f; uint32_t i; } u;
+    u.f = f;
+    str.clear();
+
+    for (int i = 0; i < 32; i++)
+    {
+      if (u.i % 2)  str.push_back('1');
+      else str.push_back('0');
+      u.i >>= 1;
+    }
+
+    // Reverse the string since now it's backwards
+    std::string temp(str.rbegin(), str.rend());
+    str = temp;
+  }
+
+
+  class KVStoreDist : public KVStoreLocal {
  public:
   explicit KVStoreDist(bool use_device_comm)
       : KVStoreLocal(use_device_comm), ps_worker_(nullptr), server_(nullptr) {
     if (IsWorkerNode()) {
       ps_worker_ = new ps::KVWorker<real_t>(0);
       ps::StartAsync("mxnet\0");
+      //what happens during recovery?
       if (!ps::Postoffice::Get()->is_recovery()) {
         ps::Postoffice::Get()->Barrier(
           ps::kWorkerGroup + ps::kServerGroup + ps::kScheduler);
@@ -88,6 +111,17 @@ class KVStoreDist : public KVStoreLocal {
     } else {
       updater_ = updater;
     }
+  }
+
+  virtual void SetCompress(const std::string& compress, const float pos_threshold,
+                     const float neg_threshold) override {
+    KVStoreLocal::SetCompress(compress, pos_threshold, neg_threshold);
+    if (get_rank() == 0) {
+      SendCommandToServers(kSetCompress, compress_);
+    }
+    //this fails. everyone just waits. why?
+//    Barrier();
+//    ps::Postoffice::Get()->Barrier(ps::kWorkerGroup + ps::kServerGroup);
   }
 
   void Barrier() override {
@@ -145,8 +179,9 @@ class KVStoreDist : public KVStoreLocal {
     if (get_rank() == 0) {
       Push_(keys, values, 0, false);
       // wait until the push is finished
-      for (const auto& v : values) {
-        v.WaitToWrite();
+      for (const int key : keys) {
+        comm_buf_[key].WaitToWrite();
+        compr_buf_[key].WaitToWrite();
       }
     } else {
       // do nothing
@@ -186,7 +221,7 @@ class KVStoreDist : public KVStoreLocal {
           RunContext rctx, Engine::CallbackOnComplete cb) {
         // convert to ps keys
         size_t size = recv_buf.shape().Size();
-        PSKV& pskv = EncodeKey(key, size);
+        PSKV& pskv = EncodeKey(key, size, false);
 #if MKL_EXPERIMENTAL == 1
         mkl_set_tblob_eager_mode(recv_buf.data());
 #endif
@@ -206,7 +241,6 @@ class KVStoreDist : public KVStoreLocal {
           FnProperty::kNormal,
           priority,
           PROFILER_MESSAGE("KVStoreDistDefaultPull"));
-
       comm_->Broadcast(key, recv_buf, grouped_vals[i], priority);
     }
   }
@@ -253,7 +287,7 @@ class KVStoreDist : public KVStoreLocal {
       }
     }
   }
-  
+
   void Push_(const std::vector<int>& keys,
              const std::vector<NDArray>& values,
              int priority,
@@ -264,91 +298,105 @@ class KVStoreDist : public KVStoreLocal {
     GroupKVPairsPush(keys, values, &uniq_keys, &grouped_vals);
 
     for (size_t i = 0; i < uniq_keys.size(); ++i) {
-      // merge over devcies
+      // merge over devices
       int key = uniq_keys[i];
-      const auto& vals = grouped_vals[i];
-      NDArray merged = do_merge ? comm_->Reduce(key, vals, priority) : vals[0];
+      const auto &vals = grouped_vals[i];
+//      if (compress_!="none") {
+//        vals[0].WaitToRead();
+//        for (int i = 0; i < vals[0].shape().Size(); i++) {
+//          CHECK_EQ(*((float *) vals[0].data().dptr_ + i), 0);
+//        }
+//      }
 
-      auto& comm_buf = comm_buf_compr[key];
-      // auto& send_buf = comm_buf_[key];
+      NDArray merged = do_merge ? comm_->Reduce(key, vals, priority) : vals[0];
       const auto storage_type = merged.storage_type();
+//      if (compress_!="none") {
+//        merged.WaitToRead();
+//        for (int i = 0; i < merged.shape().Size(); i++) {
+//          CHECK_EQ(*((float *) merged.data().dptr_ + i), 0);
+//        }
+//      }
+      auto &comm_buf = comm_buf_[key];
       if (merged.ctx().dev_mask() == cpu::kDevMask) {
-        // make sure the previous push/pull is completed
-        comm_buf.data.WaitToWrite();
-        comm_buf.data = merged;  // avoid memory copy
+        comm_buf= merged;  // avoid memory copy
       } else {
         if (comm_buf.is_none()) {
           if (storage_type == kDefaultStorage) {
-            comm_buf.data = NDArray(merged.shape(), pinned_ctx_, true, merged.dtype());
+            comm_buf = NDArray(merged.shape(), pinned_ctx_, true, merged.dtype());
           } else {
-            comm_buf.data = NDArray(storage_type, merged.shape(), pinned_ctx_, true, merged.dtype());
-          }
-
-          if (compress_) {
-            int bits = compress_type_ == "2bit" ? 16 : 32;
-            long int compressed_size = merged.shape().Size() % bits == 0 ?
-                                 merged.shape().Size() / bits + 3 :
-                                 merged.shape().Size() / bits + 4;
-            comm_buf.residual = NDArray(merged.shape(), pinned_ctx_, false, merged.dtype());
-            comm_buf.residual = 0;
-            comm_buf.compressed = NDArray(TShape{small_size}, pinned_ctx_, false, merged.dtype());
-
-            if (compress_type_.compare("2bit") == 0) {
-              pos_thre_arr_ = NDArray(TShape{1}, pinned_ctx_, false, buf.merged.dtype());
-              pos_thre_arr_ = pos_threshold_;
-              neg_thre_arr_ = NDArray(TShape{1}, pinned_ctx_, false, buf.merged.dtype());
-              neg_thre_arr_ = neg_threshold_;
-            }
+            comm_buf = NDArray(storage_type, merged.shape(), pinned_ctx_, true, merged.dtype());
           }
         }
-        CopyFromTo(merged, &(comm_buf.data));
+        CopyFromTo(merged, &comm_buf);
       }
+//      if (compress_!="none") {
+//        comm_buf.WaitToRead();
+//        for (int i = 0; i < comm_buf.shape().Size(); i++) {
+//          CHECK_EQ(*((float *) comm_buf.data().dptr_ + i), 0);
+//        }
+//      }
 
-      NDArray& send_buf;
-      //quantize
-      if (compress_) {
-        if (compress_type_.compare("2bit") == 0) {
-          Quantize(comm_buf.data, &(comm_buf.compressed), &(comm_buf.residual),
-                    pos_thre_arr_, neg_thre_arr_, compress_type_, priority);
-        } else if (compress_type_.compare("1bit") == 0) {
-          //TODO
+      if (compress_ != "none") {
+        auto &small_buf = compr_buf_[key];
+        auto &res_buf = residual_[key];
+        size_t original_size = comm_buf.shape().Size();
+        PSKV &pskv = EncodeCompressedKey(key, original_size, true);
+        // Init the small buffer and residual_ buffer for quantize
+        if (small_buf.is_none()) {
+          // small buffer for quantize
+          small_buf = NDArray(TShape{pskv.size}, comm_buf.ctx(), false, comm_buf.dtype());
+          // residual buffer for quantize
+          res_buf = NDArray(TShape{(long int) original_size}, comm_buf.ctx(), false, comm_buf.dtype());
+          res_buf = 0;
         }
-        send_buf = comm_buf.compressed;
+
+        if (compress_ == "2bit") {
+          Compress(comm_buf, &small_buf, &res_buf, pskv, priority);
+        } else {
+          LOG(FATAL) << "Unsupported quantization";
+        }
+
+        if (storage_type == kDefaultStorage) {
+          PushCompressed(key, comm_buf, small_buf, pskv, priority);
+        } else {
+          LOG(FATAL) << "compression for non default storage type unsupported";
+        }
       } else {
-        send_buf = comm_buf.data;
+        // push to servers
+        if (storage_type == kDefaultStorage) {
+          PushDefault(key, comm_buf, priority);
+        } else if (storage_type == kRowSparseStorage) {
+          PushRowSparse(key, comm_buf, priority);
+        } else {
+          LOG(FATAL) << "unknown storage type";
+        }
       }
+    }
+  }
 
-      // push to servers
-      if (storage_type == kDefaultStorage) {
-      auto push_to_servers =
-          [this, key, send_buf](RunContext rctx, Engine::CallbackOnComplete cb) {
+  void PushDefault(int key, NDArray &send_buf, int priority){
+    auto push_to_servers =
+        [this, key, send_buf](RunContext rctx, Engine::CallbackOnComplete cb) {
           // convert to ps keys
           size_t size = send_buf.shape().Size();
-          PSKV& pskv = EncodeKey(key, size);
-
+          real_t* data = send_buf.data().dptr<real_t>();
 #if MKL_EXPERIMENTAL == 1
           mkl_set_tblob_eager_mode(send_buf.data());
 #endif
-          real_t* data = send_buf.data().dptr<real_t>();
+          PSKV& pskv = EncodeDefaultKey(key, size, true);
           // do push. false means no delete
           ps::SArray<real_t> vals(data, size, false);
           CHECK_NOTNULL(ps_worker_)->ZPush(
-              pskv.keys, vals, pskv.lens, 0, [cb]() { cb(); });
+              pskv.keys, vals, pskv.lens, kDefaultPushPull, [cb]() { cb(); });
         };
-        Engine::Get()->PushAsync(
-            push_to_servers,
-            pinned_ctx_,
-            {send_buf.var()},
-            {},
-            FnProperty::kNormal,
-            priority,
-            PROFILER_MESSAGE("KVStoreDistDefaultPush"));
-      } else if (storage_type == kRowSparseStorage) {
-        PushRowSparse(key, send_buf, priority);
-      } else {
-        LOG(FATAL) << "unknown storage type";
-      }
-    }
+    Engine::Get()->PushAsync(
+        push_to_servers,
+        pinned_ctx_,
+        {send_buf.var()},
+        {},
+        FnProperty::kNormal,
+        priority,
+        PROFILER_MESSAGE("KVStoreDistDefaultPush"));
   }
 
   // pull row sparse weight into `recv_buf` based on indices given by `indices`
@@ -451,20 +499,193 @@ class KVStoreDist : public KVStoreLocal {
    * \brief cache all key partitions
    */
   std::unordered_map<int, PSKV> ps_kv_;
-
+  std::unordered_map<int, PSKV> push_ps_kv_;
+  std::unordered_map<int, PSKV> pull_ps_kv_;
   /**
-   * \brief serizelize EncodeRowSparseKey and EncodeKey
+   * \brief serialize EncodeRowSparseKey and EncodeKey
    */
   std::mutex mu_;
+
+  void PushCompressed(int key, NDArray& comm_buf, NDArray &small_buf, PSKV& pskv, int priority){
+    auto push_to_servers =
+      [this, key, comm_buf, pskv, small_buf](RunContext rctx, Engine::CallbackOnComplete cb) {
+        // convert to ps keys
+        size_t size = small_buf.shape().Size();
+        real_t* data = small_buf.data().dptr<real_t>();
+        #if MKL_EXPERIMENTAL == 1
+        mkl_set_tblob_eager_mode(small_buf.data());
+        #endif
+        // do push. false means no delete
+        ps::SArray<real_t> vals(data, size, false);
+        CHECK_NOTNULL(ps_worker_)->ZPush(
+          pskv.keys, vals, pskv.lens, kDefaultPushPull, [cb]() { cb(); });
+      };
+    Engine::Get()->PushAsync(
+      push_to_servers,
+      pinned_ctx_,
+      {small_buf.var(), comm_buf.var()},
+      {},
+      FnProperty::kNormal,
+      priority,
+      PROFILER_MESSAGE("KVStoreDistCompressedPush"));
+  }
+
+
+  void Compress(NDArray& comm_buf, NDArray* small_buf, NDArray* res_buf, PSKV& pskv, int priority){
+    size_t orig_size = comm_buf.shape().Size();
+    NDArray flattened_comm_buf = comm_buf.Reshape(TShape{(long int) orig_size});
+    int bits;
+    if (compress_ == "2bit") {
+      bits = 16;
+    } else {
+      LOG(FATAL) << "Unsupported compression type";
+    }
+    //should be start of data in original commbuf
+    size_t cur_from = 0;
+    //should be start of meta in new small_buf
+    size_t cur_to = 0;
+    for(size_t i=0; i<pskv.keys.size(); i++) {
+      // first 3 elements of this are meta info (thresholds
+      // and size of original arr compressed
+      NDArray part_compr = small_buf->Slice(cur_to, cur_to+pskv.lens[i]);
+      // removing the 3 values from pskv length which are meta data
+      size_t end_part_data = cur_from + (pskv.lens[i] - 3 )* bits;
+      // don't exceed origin_size
+      if (end_part_data > orig_size) {
+        end_part_data = orig_size;
+      }
+      NDArray part_data = flattened_comm_buf.Slice(cur_from, end_part_data);
+//      for(int i=0; i<part_data.shape().Size(); i++){
+//        CHECK_EQ(*((float *) part_data.data().dptr_+i),0);
+//      }
+      NDArray part_res = res_buf->Slice(cur_from, end_part_data);
+      Quantize(part_data, &part_compr, &part_res, neg_threshold_, pos_threshold_, compress_, priority);
+      part_compr.WaitToRead();
+
+//        CHECK_EQ(*(float *) part_compr.data().dptr_,-0.5);
+//        CHECK_EQ(*((float *) part_compr.data().dptr_+1),0.5);
+//        for(int i=3; i<part_compr.shape().Size(); i++){
+//          CHECK_EQ(*((float *) part_compr.data().dptr_+i),0);
+//        }
+
+
+//      std::string s;
+//      float d = *((float *) part_compr.data().dptr_+3);
+//      float n = *((float *) part_compr.data().dptr_);
+//      float p = *((float *) part_compr.data().dptr_+1);
+//      floatToBinary(d , s);
+//      std::cout<<"sent "<<n<<" "<<p<<" "<<s<<std::endl;
+      cur_from = end_part_data;
+      cur_to = cur_to + pskv.lens[i];
+    }
+    CHECK_EQ(cur_from, orig_size);
+    CHECK_EQ(cur_to, small_buf->shape().Size());
+  }
+
+  PSKV& EncodeKey(int key, size_t size, bool is_push) {
+    if (compress_!="none") {
+      return EncodeCompressedKey(key, size, is_push);
+    } else {
+      return EncodeDefaultKey(key, size, is_push);
+    }
+  }
+
+  /**
+   * \brief Convert to keys in ps for compressed values
+   * \brief Divides original array into equal parts for each server
+   * with space for meta info
+   */
+  inline PSKV& EncodeCompressedKey(int key, size_t original_size, bool is_push) {
+    auto krs = ps::Postoffice::Get()->GetServerKeyRanges();
+    int num_servers = krs.size();
+    CHECK_GT(num_servers, 0);
+    int bits;
+    if (compress_ == "2bit") {
+      bits = 16;
+    } else {
+      LOG(FATAL)<<"Unsupported compression type";
+    }
+    // represents size of data to be sent
+//    size_t size = 0;
+    size_t compr_size = 0;
+    // add 3 values as meta info
+    if (original_size >= bigarray_bound_) {
+      compr_size = num_servers * ((original_size/num_servers) % bits == 0 ?
+                       (original_size/num_servers)/bits + 3 :
+                       (original_size/num_servers)/bits + 4);
+    } else {
+      compr_size = original_size % bits == 0 ?
+             original_size / bits + 3: original_size / bits + 4;
+    }
+
+//  size = original_size;
+
+    mu_.lock();
+    PSKV& pskv = (is_push) ? push_ps_kv_[key] : pull_ps_kv_[key];
+    mu_.unlock();
+
+    if (!pskv.keys.empty()) {
+      size_t size = (is_push) ? compr_size : original_size;
+      CHECK_EQ(static_cast<size_t >(pskv.size), size)<< "The value size can't be changed";
+    } else {
+      // populate both pull and push pskvs
+      mu_.lock();
+      PSKV& pull_pskv = pull_ps_kv_[key];
+      PSKV& push_pskv = push_ps_kv_[key];
+      mu_.unlock();
+
+      if (original_size < bigarray_bound_) {
+        // a simple heuristic for load balancing
+        // send it to a single random picked server
+        int server = (key * 9973) % num_servers;
+        ps::Key ps_key = krs[server].begin() + key;
+        CHECK_LT(ps_key, krs[server].end());
+        push_pskv.keys.push_back(ps_key);
+        pull_pskv.keys.push_back(ps_key);
+        push_pskv.lens.push_back(compr_size);
+        pull_pskv.lens.push_back(original_size);
+        push_pskv.size = compr_size;
+        pull_pskv.size = original_size;
+      } else {
+        // partition it to all servers
+        push_pskv.size = 0;
+        pull_pskv.size = 0;
+        for (int i = 0; i < num_servers; ++i) {
+          size_t part_orig =
+            static_cast<size_t> (round(static_cast<double>(original_size)/num_servers*(i+1))) -
+            static_cast<size_t> (round(static_cast<double>(original_size)/num_servers*(i)));
+          // if block was rounded up to beyond size of our data, set it to end of data
+          if (part_orig + pskv.size > original_size) {
+            part_orig = original_size - pskv.size;
+          }
+          size_t compr_split = (part_orig % bits == 0)? part_orig/bits + 3 : part_orig/bits + 4;
+
+          ps::Key ps_key = krs[i].begin() + key;
+          CHECK_LT(ps_key, krs[i].end());
+          push_pskv.keys.push_back(ps_key);
+          pull_pskv.keys.push_back(ps_key);
+          // push_pskv stores lengths of compressed blocks
+          push_pskv.lens.push_back(compr_split);
+          // pull_pskv stores lengths of original data
+          pull_pskv.lens.push_back(part_orig);
+          push_pskv.size += compr_split;
+          pull_pskv.size += part_orig;
+        }
+        CHECK_EQ(static_cast<size_t>(push_pskv.size), compr_size);
+        CHECK_EQ(static_cast<size_t>(pull_pskv.size), original_size);
+        CHECK_EQ(push_pskv.lens.size(), num_servers);
+        }
+      }
+    return pskv;
+  }
 
   /**
    * \brief convert to keys in ps
    */
-  inline PSKV& EncodeKey(int key, size_t size) {
+  inline PSKV& EncodeDefaultKey(int key, size_t size, bool is_push) {
     mu_.lock();
-    PSKV& pskv = ps_kv_[key];
+    PSKV& pskv = (is_push) ? push_ps_kv_[key] : pull_ps_kv_[key];
     mu_.unlock();
-
     if (!pskv.keys.empty()) {
       CHECK_EQ(static_cast<size_t>(pskv.size), size) << "The value size cannot be changed";
     } else {
@@ -570,22 +791,11 @@ class KVStoreDist : public KVStoreLocal {
    * \brief threshold for partition
    */
   size_t bigarray_bound_;
-  /// \brief send & recver buffer
-  
   std::unordered_map<int, NDArray> comm_buf_;
-
-  struct BufferEntry {
-    /// \brief the original value
-    NDArray data;
-    /// \brief the residual buffer
-    std::NDArray residual;
-    /// \brief the small buffer for compressed data in sender
-    std::NDArray compressed;
-  };
-  std::unordered_map<int, BufferEntry> comm_buf_compr_;
-
-  NDArray pos_thre_arr_;
-  NDArray neg_thre_arr_;
+  /// \brief small buffer for quantize
+  std::unordered_map<int, NDArray> compr_buf_;
+  /// \brief residual buffer for quantize
+  std::unordered_map<int, NDArray> residual_;
 
   bool log_verbose_;
 };
