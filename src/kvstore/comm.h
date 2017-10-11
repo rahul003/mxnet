@@ -509,10 +509,10 @@ class CommDevice : public Comm {
         EnableP2P(devs);
       }
     }
-    
+
     auto& buf = merge_buf_[key];
     std::vector<NDArray> reduce(src.size());
-    
+
     if (buf.copy_buf.empty()) {
       // TODO(mli) this results in large device memory usage for huge ndarray,
       // such as the largest fullc in VGG. consider to do segment reduce with
