@@ -735,12 +735,12 @@ int MXKVStoreCreate(const char *type,
 
 int MXKVStoreSetCompress(KVStoreHandle handle,
                          const char *compress,
-                         const float pos_threshold,
-                         const float neg_threshold) {
+                         const float neg_threshold,
+                         const float pos_threshold) {
   API_BEGIN();
   static_cast<KVStore*>(handle)->SetCompress(compress,
-                                             pos_threshold,
-                                             neg_threshold);
+                                             neg_threshold,
+                                             pos_threshold);
   API_END();
 }
 
@@ -1111,6 +1111,14 @@ int MXRecordIOReaderSeek(RecordIOHandle handle, size_t pos) {
   MXRecordIOContext *context =
     reinterpret_cast<MXRecordIOContext*>(handle);
   context->reader->Seek(pos);
+  API_END();
+}
+
+int MXRecordIOReaderTell(RecordIOHandle handle, size_t *pos) {
+  API_BEGIN();
+  MXRecordIOContext *context =
+    reinterpret_cast<MXRecordIOContext*>(handle);
+  *pos = context->reader->Tell();
   API_END();
 }
 

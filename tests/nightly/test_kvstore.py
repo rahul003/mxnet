@@ -21,6 +21,7 @@ import sys
 sys.path.insert(0, "../../python/")
 import mxnet as mx
 import numpy as np
+from mxnet.test_utils import assert_almost_equal
 
 def check_diff_to_scalar(A, x, rank=None):
     """ assert A == x"""
@@ -32,7 +33,7 @@ shapes = [(4, 4), (100, 100), (2000, 2000)];
 
 lr = .1
 nworker = 4
-nrepeat = 1
+nrepeat = 10
 
 ## generate data
 data = [[[np.random.random(s)*2-1 for i in range(nworker)] for s in shapes] for j in range(nrepeat)]
@@ -44,7 +45,7 @@ def test_kvstore(kv_type):
     kv.set_optimizer(mx.optimizer.create('test', rescale_grad=lr))
     for k, s in zip(keys, shapes):
         kv.init(k, mx.nd.zeros(s))
-       
+
     res = [np.zeros(s) for s in shapes]
     for i in range(nrepeat):
         for j in range(len(keys)):
@@ -60,7 +61,7 @@ def test_kvstore(kv_type):
             assert(err < 1e-6), (err, shapes[j])
 
 def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
-    print(kv_type, compress)
+    print(kv_type + ' with ' + compress + ' compression')
     rate = 2
     kv = mx.kv.create(kv_type)
     kv.set_compress({'compress':compress, 'neg_threshold':neg, 'pos_threshold':pos})
@@ -73,8 +74,9 @@ def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
             for j in range(len(keys)):
                 out = [mx.nd.ones(shapes[j], mx.gpu(g)) for g in range(nworker)]
                 kv.pull(keys[j], out=out)
+                exp = np.zeros_like(out[0].asnumpy())
                 for o in out:
-                    check_diff_to_scalar(o, 0)
+                    assert_almost_equal(o.asnumpy(), exp)
 
     def push_zeros(kv):
         for i in range(nrepeat):
@@ -82,8 +84,9 @@ def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
                 kv.push(keys[j], [mx.nd.zeros(shapes[j], mx.gpu(g)) for g in range(nworker)])
                 out = [mx.nd.ones(shapes[j], mx.gpu(g)) for g in range(nworker)]
                 kv.pull(keys[j], out=out)
+                exp = np.zeros_like(out[0].asnumpy())
                 for o in out:
-                    check_diff_to_scalar(o, 0)
+                    assert_almost_equal(o.asnumpy(), exp)
 
     def verify_residual(kv, neg_threshold, pos_threshold, rate):
         for j in range(len(keys)):
@@ -93,7 +96,7 @@ def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
             for o in out:
                 check_diff_to_scalar(o, 0)
 
-            kv.push(keys[j], [mx.nd.ones(shapes[j], mx.gpu(g))*(pos_threshold-0.4) for g in range(nworker)])
+            kv.push(keys[j], [mx.nd.ones(shapes[j], mx.gpu(g))*(pos_threshold-0.3) for g in range(nworker)])
             out = [mx.nd.zeros(shapes[j], mx.gpu(g)) for g in range(nworker)]
             kv.pull(keys[j],out=out)
             curval = pos_threshold * rate * nworker
@@ -112,7 +115,7 @@ def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
             curval += pos_threshold*rate*nworker
             for o in out:
                 check_diff_to_scalar(o, curval)
-            return curval
+        return curval
 
     def check_ones(kv, pos, rate, curval):
         newval = curval + rate*nworker*pos
@@ -132,6 +135,7 @@ test_kvstore('local_update_cpu')
 test_kvstore('local_allreduce_cpu')
 test_kvstore('local_allreduce_device')
 
+# compression for local kvstore happens only when reduce is on device
 test_compress_kvstore('local_allreduce_device')
 
 ## group keys interface

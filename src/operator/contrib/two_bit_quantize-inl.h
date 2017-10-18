@@ -37,7 +37,7 @@ namespace op {
 struct init_mem_2bit {
   // Initialize output array
   MSHADOW_XINLINE static void Map(int i, float* out) {
-    *reinterpret_cast<int*>(out+i) = 0x00000000;
+    *(out+i) = 0;
   }
 };
 
@@ -109,73 +109,41 @@ struct init_threshold_2bit {
     // The third element is the original size of the array
     out[0] = neg_threshold;
     out[1] = pos_threshold;
-    out[2] = (float)size;
+    // TODO(huilgolr) check potential problem here?
+    out[2] = static_cast<float>(size);
   }
 };
 
 struct quantize_2bit {
-  MSHADOW_XINLINE static void Map(int i,
+  MSHADOW_XINLINE static void Map(int block_id,
+                                  int grad_size,
                                   float *out,
                                   float *grad,
                                   float *residual,
                                   const float neg_threshold,
                                   const float pos_threshold) {
-    // Add residual to gradient
-    grad[i] += residual[i];
-
-    // Considers each float in the output array as forming a block
-    // Each block comprises a 4x4 grid. Each value in this grid
-    // refers to one float in the original grad array
-    // Only supports float32
-
-    // get block id
-    int block_id = i / 16;
-    char* ch_ptr = reinterpret_cast<char*>(out+block_id);
-    // get row ptr
-    int row_id = (i%16)/4;
-    ch_ptr += row_id;
-    // get column id
-    int col_id = (i%16)%4;
-    // Compress
-    if (grad[i] <= neg_threshold) {  // set data to 01
-      // new residual
-      residual[i] = grad[i] - neg_threshold;
-      switch (col_id) {
-        case 0:
-          (*ch_ptr) |= 0x40;  // binary: (01)00 0000
-          break;
-        case 1:
-          (*ch_ptr) |= 0x10;  // binary: 00(01) 0000
-          break;
-        case 2:
-          (*ch_ptr) |= 0x04;  // binary: 0000 (01)00
-          break;
-        case 3:
-          (*ch_ptr) |= 0x01;  // binary: 0000 00(01)
-          break;
-        default:
-          break;
+    float* compr_block = out + block_id;
+    // init to 0
+    *compr_block = 0;
+    // start and end are indices in original grad array
+    int start = block_id*16;
+    int end = (start+16 <= grad_size) ? start+16 : grad_size;
+    char* block_ptr = reinterpret_cast < char* > (compr_block);
+    for (int i=start; i < end; i++){
+      char* curr_byte = block_ptr + (i-start)/4;
+      float curr_value = grad[i] + residual[i];
+      if (curr_value >= pos_threshold) {
+        residual[i] = curr_value - pos_threshold;
+        // set data to 10
+        (*curr_byte) |= (2u << (6-((i%4)*2)));
+      } else if (curr_value <= neg_threshold) {
+        residual[i] = curr_value - neg_threshold;
+        // set data to 01
+        (*curr_byte) |= (1u << (6-((i%4)*2)));
+      } else {
+        // leave data as 00
+        residual[i] = curr_value;
       }
-    } else if (grad[i] >= pos_threshold) {  // set data to 10
-      residual[i] = grad[i] - pos_threshold;
-      switch (col_id) {
-        case 0:
-          (*ch_ptr) |= 0x80;  // binary: (10)00 0000
-          break;
-        case 1:
-          (*ch_ptr) |= 0x20;  // binary: 00(10) 0000
-          break;
-        case 2:
-          (*ch_ptr) |= 0x08;  // binary: 0000 (10)00
-          break;
-        case 3:
-          (*ch_ptr) |= 0x02;  // binary: 0000 00(10)
-          break;
-        default:
-          break;
-      }
-    } else {  // else 00
-      residual[i] = grad[i];
     }
   }
 };
@@ -183,24 +151,22 @@ struct quantize_2bit {
 template<typename xpu>
 void Quantize2BitImpl(mshadow::Stream<xpu>* s, const std::vector<TBlob>& inputs,
                       const float neg_threshold, const float pos_threshold) {
-  // First, init the memory of output to 0x00000000
-  mxnet_op::Kernel<init_mem_2bit, xpu>::Launch(s, inputs[2].Size(),
-                              inputs[2].dptr<float>());  // compressed array
-  // Then, init threshold and original size
+  // Init threshold and original size
   mxnet_op::Kernel<init_threshold_2bit, xpu>::Launch(s, 1,
                               inputs[2].dptr<float>(),   // compressed array
                               neg_threshold, pos_threshold,
                               inputs[0].Size());
   // Finally, compress the data and calculate new residual
-  mxnet_op::Kernel<quantize_2bit, xpu>::Launch(s, inputs[0].Size(),
+  mxnet_op::Kernel<quantize_2bit, xpu>::Launch(s, inputs[2].Size()-3,
+                          inputs[0].Size(),            // original grad size
                           inputs[2].dptr<float>()+3,   // compressed array
                           inputs[0].dptr<float>(),     // input array
                           inputs[1].dptr<float>(),     // residual array
-                          neg_threshold,     // negative threshold
-                          pos_threshold);    // positive threshold
+                          neg_threshold,               // negative threshold
+                          pos_threshold);              // positive threshold
 }
 
-// function defined as operator
+// this function has been defined as quantize_2bit operator
 template<typename xpu>
 void Quantize2BitCompute(const nnvm::NodeAttrs& attrs,
                          const OpContext& ctx,
@@ -347,7 +313,7 @@ inline bool Dequantize2BitShape(const nnvm::NodeAttrs& attrs,
   // check input
   CHECK(!shape_is_none(in_attrs->at(0)));
   CHECK(!shape_is_none(in_attrs->at(1)));
-  //TODO(huilgolr) check
+  // TODO(huilgolr) check
   CHECK_LE(in_attrs->at(1).Size(),
            in_attrs->at(0).Size()*16)
     << "The shape of the second input array are "

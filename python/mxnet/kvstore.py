@@ -140,10 +140,12 @@ class KVStore(object):
         """ Pushes a single or a sequence of key-value pairs into the store.
 
         This function returns immediately after adding an operator to the engine.
-        The actual operation is executed asynchronously after all previous `push`
-        for the same input key(s) are finished.
-        There is no synchronization between workers. One can use ``_barrier()``
-        to sync all workers.
+        The actual operation is executed asynchronously. If there are consecutive
+        pushes to the same key, there is no guarantee on the serialization of pushes.
+        The execution of a push does not guarantee that all previous pushes are
+        finished.
+        There is no synchronization between workers.
+        One can use ``_barrier()`` to sync all workers.
 
         Parameters
         ----------
@@ -221,12 +223,13 @@ class KVStore(object):
         Subsequent attempts to read from the `out` variable will be blocked until the
         pull operation completes.
 
-        `pull` is executed asynchronously after all previous `push` and `pull` calls
-        for the same input key(s) are finished.
+        `pull` is executed asynchronously after all previous `pull` calls and only
+        the last `push` call for the same input key(s) are finished.
 
-        The returned values are gauranteed to be the latest values in the store.
+        The returned values are guaranteed to be the latest values in the store.
 
-        For `RowSparseNDArray` values, please use ``row_sparse_pull`` instead.
+        For `RowSparseNDArray` values, this call is ignored,
+        please use ``row_sparse_pull`` instead.
 
         Parameters
         ----------
@@ -287,7 +290,8 @@ class KVStore(object):
         from the store with specified row_ids.
 
         `row_sparse_pull` is executed asynchronously after all previous
-        `push`/`pull`/`row_sparse_pull` calls for the same input key(s) are finished.
+        `pull`/`row_sparse_pull` calls and the last `push` call for the
+        same input key(s) are finished.
 
         The returned values are guaranteed to be the latest values in the store.
 
@@ -345,17 +349,77 @@ class KVStore(object):
             check_call(_LIB.MXKVStorePullRowSparse(
                 self.handle, mx_uint(len(ckeys)), ckeys, cvals, crow_ids, ctypes.c_int(priority)))
 
+    def set_compress(self, compress_params=None):
+        """ Specifies type of low-bit quantization for gradient compression if any,
+         and additional arguments depending on the type of compression being used.
 
-    def set_compress(self, compress_params={}):
-        """ Set to use low-bit compression
+        Parameters
+        ----------
+        compress_params : dict
+            `compress_params` is a dictionary specifying the type and parameters
+            for gradient compression. The key `compress` in this dictionary is a required argument
+            and specifies the type of gradient compression. Other keys in this
+            dictionary are optional and specific to the type of gradient compression.
 
-        compress can be 'none', '2bit', or '1bit'.
+            2bit Gradient Compression
+            ---------
+            2bit gradient compression takes two thresholds, one for positive values and
+            other for negative thresholds. This works by limiting positive values in the
+            gradient to the positive threshold, and limiting negative values to the
+            negative threshold. Values which don't meet the thresholds are set to 0.
+            By doing so, each value in the gradient is in one of three states. 2bits are
+            used to represent these states, and every 16 float values in the original
+            gradient can be represented using one float. This compressed representation
+            can reduce communication costs. The difference between these values and
+            original values is stored at the sender's end as residual and added to the
+            gradient in the next iteration.
+
+            When kvstore is 'local', gradient compression is used to reduce communication
+            between multiple devices (gpus). Gradient is quantized on each GPU which
+            computed the gradients, then sent to the GPU which merges the gradients. This
+            receiving GPU dequantizes the gradients and merges them. Note that this
+            increases memory usage on each GPU because of the residual array stored.
+
+            When kvstore is 'dist', gradient compression is used to reduce communication
+            from worker to sender. Gradient is quantized on each worker which
+            computed the gradients, then sent to the server which dequantizes
+            this data and merges the gradients from each worker. Note that this
+            increases CPU memory usage on each worker because of the residual array stored.
+            Only worker to server communication is compressed in this setting.
+            If each machine has multiple GPUs, currently this GPU to GPU communication is
+            not compressed. Server to worker communication (in the case of pull) is also not
+            compressed.
+
+            To use 2bit compression, we need to specify `compress` as `2bit`.
+            Only specifying `compress` would use default values
+            for the other arguments of thresholds.
+            To completely specify the arguments for 2bit compression, we would need to pass
+            a dictionary which includes `positive_threshold` and `negative_threshold` like:
+            {'compress':'2bit', 'positive_threshold':0.5, 'negative_threshold':-0.5}
+            compress: str
+                type of low-bit quantization to be used for gradient compression
+                Can only be '2bit' for now.
+                2bit gradient compression uses 2bit quantization with residual to compress
+                gradients. It works by converts each value in the original gradient to use
+                2 bits, causing size of gradient to be 1/16th of the original gradient
+                (and 3 floats of meta information).
+            pos_threshold: float
+                positive threshold used for 2bit quantization of gradients
+                Positive values in gradient above positive threshold will be set to
+                positive threshold. Positive values lesser than positive threshold will
+                be set to 0.
+            neg_threshold: float
+                negative threshold used for 2bit quantization of gradients
+                Negative values in gradient less than negative threshold will be set to
+                negative threshold. Negative values greater than negative threshold will
+                be set to 0.
         """
+        compress_params = compress_params if compress_params else {'compress':'none'}
         if 'compress' not in compress_params:
-            compress_params['compress'] = 'none'
+            raise ValueError('compress_params requires compress to be set')
         elif not isinstance(compress_params['compress'], string_types):
             raise TypeError('compress must be a string')
-        elif compress_params['compress'] not in ['none','2bit']:
+        elif compress_params['compress'] not in ['none', '2bit']:
             raise ValueError('Unsupported type of compression')
 
         if compress_params['compress'] == '2bit':
@@ -371,15 +435,15 @@ class KVStore(object):
             else:
                 compress_params['neg_threshold'] = -0.1
 
-            if (compress_params['pos_threshold'] <= 0 or compress_params['neg_threshold'] >= 0):
+            if compress_params['pos_threshold'] <= 0 or compress_params['neg_threshold'] >= 0:
                 raise ValueError('pos_threshold needs to be greater than 0, \
                                  and neg_threshold needs to be less than 0')
 
         if compress_params['compress'] == '2bit':
             check_call(_LIB.MXKVStoreSetCompress(self.handle,
-                                             c_str(compress_params['compress']),
-                                             mx_float(compress_params['pos_threshold']),
-                                             mx_float(compress_params['neg_threshold'])))
+                                                 c_str(compress_params['compress']),
+                                                 mx_float(compress_params['neg_threshold']),
+                                                 mx_float(compress_params['pos_threshold'])))
 
     def set_optimizer(self, optimizer):
         """ Registers an optimizer with the kvstore.

@@ -135,8 +135,8 @@ class KVStoreLocal : public KVStore {
     PullRowSparseImpl(keys, val_rowids, priority);
   }
 
-  virtual void SetCompress(const std::string& compress, const float pos_threshold,
-                   const float neg_threshold) override {
+  void SetCompress(const std::string& compress, const float neg_threshold,
+                   const float pos_threshold) override {
     compress_ = compress;
     pos_threshold_ = pos_threshold;
     neg_threshold_ = neg_threshold;
@@ -151,7 +151,7 @@ class KVStoreLocal : public KVStore {
       local_[keys[i]] = values[i].Copy(pinned_ctx_);
       comm_->Init(keys[i], values[i].storage_type(), values[i].shape(), values[i].dtype());
     }
-    comm_->SetCompress(compress_type_, pos_threshold_, neg_threshold_);
+    comm_->SetCompress(compress_, neg_threshold_, pos_threshold_);
   }
 
   virtual void PushImpl(const std::vector<int>& keys,
@@ -275,6 +275,7 @@ class KVStoreLocal : public KVStore {
       // invalid, print warning messages once
       if (this->warnings_printed_.find(key) == this->warnings_printed_.end()) {
         LOG(INFO) << "Warning: non-default weights detected during kvstore pull. "
+                  << "This call has been ignored. "
                   << "Please make sure to use row_sparse_pull with row_ids.";
         this->warnings_printed_.insert(key);
       }
