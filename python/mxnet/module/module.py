@@ -532,6 +532,7 @@ class Module(BaseModule):
 
         if kvstore:
             kvstore.set_compress(self._compress_params)
+            print('setting compress')
             # copy initialized local parameters to kvstore
             _initialize_kvstore(kvstore=kvstore,
                                 param_arrays=self._exec_group.param_arrays,

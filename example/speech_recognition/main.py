@@ -316,6 +316,7 @@ if __name__ == '__main__':
                 context=contexts
                 )
         else:
+            print('setting compress as ',args.config.get('train','compress'))
             data_names = [x[0] for x in data_train.provide_data]
             label_names = [x[0] for x in data_train.provide_label]
             module = mx.module.Module(model_loaded, context=contexts,

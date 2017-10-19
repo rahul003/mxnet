@@ -75,6 +75,7 @@ def do_training(args, module, data_train, data_val, begin_epoch=0):
 
     def reset_optimizer(force_init=False):
         if optimizer == "sgd":
+            print('kvstore type is device')
             module.init_optimizer(kvstore='device',
                                   optimizer=optimizer,
                                   optimizer_params={'lr_scheduler': lr_scheduler,
@@ -83,6 +84,7 @@ def do_training(args, module, data_train, data_val, begin_epoch=0):
                                                     'wd': weight_decay},
                                   force_init=force_init)
         elif optimizer == "adam":
+            print('kvstore type is device')
             module.init_optimizer(kvstore='device',
                                   optimizer=optimizer,
                                   optimizer_params={'lr_scheduler': lr_scheduler,
