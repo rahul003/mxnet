@@ -886,19 +886,23 @@ def test_nearest_upsampling():
 
 def test_batchnorm_training():
     def check_batchnorm_training(stype):
-        for shape in [(2, 3, 2, 2)]:
+        for shape in [(2,3), (2, 3, 2, 2)]:
             data_tmp = np.load('data_tmp.npy')
+            # data_tmp = np.random.uniform(100, 1000, size=shape)
             s = shape[1],
             gamma = np.ones(s)
             beta = np.ones(s)
             gamma[1] = 3
             beta[0] = 3
-            print(data_tmp)
-            np.save('data_tmp',data_tmp)
-            rolling_mean = np.array([0.41657404, 0.625634, 0.54921245])
-            rolling_std = np.array([0.54226136, 0.2317358, 0.28460933])
-            # print(rolling_mean)
-            # print(rolling_std)
+            # print(data_tmp)
+            # np.save('data_tmp',data_tmp)
+            # rolling_mean = np.random.uniform(size=s)
+            # rolling_std = np.random.uniform(size=s)
+            rolling_mean = np.load('mean.npy')
+            rolling_std = np.load('std.npy')
+            # np.save('mean',rolling_mean)
+            # np.save('std',rolling_std)
+
             data = mx.symbol.Variable('data', stype=stype)
             in_location = [mx.nd.array(data_tmp).tostype(stype), mx.nd.array(gamma).tostype(stype),
                            mx.nd.array(beta).tostype(stype)]
@@ -4122,5 +4126,7 @@ def test_scatter_gather_nd():
 
 
 if __name__ == '__main__':
-    import nose
-    nose.runmodule()
+    for i in range(10000):
+        test_batchnorm_training()
+    # import nose
+    # nose.runmodule()
