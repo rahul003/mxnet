@@ -728,28 +728,47 @@ def numeric_grad(executor, location, aux_states=None, eps=1e-4,
             continue
         stype = executor.arg_dict[k].stype
         old_value = v.copy()
-        for i in range(np.prod(v.shape)):
-            # inplace update
-            v.ravel()[i] += eps/2.0
-            executor.arg_dict[k][:] = as_stype(v, stype, dtype=dtype)
-            if aux_states is not None:
-                for key, val in aux_states.items():
-                    executor.aux_dict[key][:] = val
-            executor.forward(is_train=use_forward_train)
-            f_peps = executor.outputs[0].asnumpy()
 
-            v.ravel()[i] -= eps
-            executor.arg_dict[k][:] = as_stype(v, stype, dtype=dtype)
-            if aux_states is not None:
-                for key, val in aux_states.items():
-                    adstype = executor.aux_dict[key].stype
-                    executor.aux_dict[key][:] = as_stype(val, adstype, dtype=dtype)
-            executor.forward(is_train=use_forward_train)
-            f_neps = executor.outputs[0].asnumpy()
+        executor.arg_dict[k][:] = as_stype(v, stype, dtype=dtype)
+        if aux_states is not None:
+            for key, val in aux_states.items():
+                executor.aux_dict[key][:] = val
+        executor.forward(is_train=use_forward_train)
+        fx = executor.outputs[0].asnumpy()
 
-            approx_grad = (f_peps - f_neps).sum() / eps
-            approx_grads[k].ravel()[i] = approx_grad
-            v.ravel()[i] = old_value.ravel()[i]
+        epslist = []
+        if k in ['batchnorm225_beta', 'batchnorm_v10_beta']:
+            epslist = list(np.arange(-0.1, 0.1, 0.001))
+        else:
+            epslist = [eps]
+        for e in epslist:
+            for i in range(np.prod(v.shape)):
+                # inplace update
+                v.ravel()[i] += e
+                executor.arg_dict[k][:] = as_stype(v, stype, dtype=dtype)
+                if aux_states is not None:
+                    for key, val in aux_states.items():
+                        executor.aux_dict[key][:] = val
+                executor.forward(is_train=use_forward_train)
+                f_peps = executor.outputs[0].asnumpy()
+
+                v.ravel()[i] -= 2*e
+                executor.arg_dict[k][:] = as_stype(v, stype, dtype=dtype)
+                if aux_states is not None:
+                    for key, val in aux_states.items():
+                        adstype = executor.aux_dict[key].stype
+                        executor.aux_dict[key][:] = as_stype(val, adstype, dtype=dtype)
+                executor.forward(is_train=use_forward_train)
+                f_neps = executor.outputs[0].asnumpy()
+
+                approx_grad = (f_peps - f_neps).sum() / e
+                approx_grads[k].ravel()[i] = approx_grad
+
+                if i==0 and k in ['batchnorm225_beta', 'batchnorm_v10_beta']:
+                    print ('fpeps-fx', (f_peps-fx).sum(), 'eps', e, 'fneps-fx', (f_neps-fx).sum(), 'grad', (f_peps-f_neps).sum()/(2*e))
+                    print ('approx_grads',approx_grad)
+                v.ravel()[i] = old_value.ravel()[i]
+
         # copy back the original value
         executor.arg_dict[k][:] = as_stype(old_value, stype, dtype=dtype)
 
