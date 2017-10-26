@@ -928,7 +928,7 @@ def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rto
         sym_grad = symbolic_grads[name]
 
         print(fd_grad, orig_grad, sym_grad)
-
+        print (np.where(orig_grad < 1e-3))
         if grad_req[name] == 'write':
             assert_almost_equal(fd_grad, sym_grad, rtol, atol,
                                 ("NUMERICAL_%s"%name, "BACKWARD_%s"%name))
