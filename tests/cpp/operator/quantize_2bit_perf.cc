@@ -38,17 +38,17 @@ static void RunTimingTest(const bool isGPU,
 
   // prime code and cache before the performance runs
   test::op::CoreOperatorRunner<DType> runner;
-  runner.RunBidirectional(false, { {16000}, {16000}, {1003} }, kwargs, 1);
+  runner.RunBidirectional(false, { {250000000}, {250000000}, {15625003} }, kwargs, 1);
 
   // Do the performance runs
   std::vector<std::vector<TShape>> shapes;
   if (test::performance_run) {
     shapes = {
-      { {16000}, {16000}, {1003} },
-      { {16000}, {16000}, {1003} },
-      { {16000}, {16000}, {1003} },
-      { {16000}, {16000}, {1003} },
-      { {16000}, {16000}, {1003} },
+      { {250000000}, {250000000}, {15625003} },
+      { {250000000}, {250000000}, {15625003} },
+      { {250000000}, {250000000}, {15625003} },
+      { {250000000}, {250000000}, {15625003} },
+      { {250000000}, {250000000}, {15625003} },
     };
   } else {
     shapes = {
@@ -96,6 +96,7 @@ TEST(QUANTIZE_2BIT_PERF, TimingGPU) {
                        { {"pos_threshold", "0.5"},
                        {"neg_threshold", "0.5"} },
                        "_contrib_quantize_2bit");
-}}
+}
+
 #endif  // MXNET_USE_CUDA == 1
 
