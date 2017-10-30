@@ -756,8 +756,8 @@ def numeric_grad(executor, location, aux_states=None, eps=1e-4,
             #print('approx_grad', approx_grad)
             approx_grads[k].ravel()[i] = approx_grad
             v.ravel()[i] = old_value.ravel()[i]
-            if (i==22):
-                plot(old_value, i, k, executor, stype, dtype, aux_states, use_forward_train)
+            #if (i==22):
+             #   plot(old_value, i, k, executor, stype, dtype, aux_states, use_forward_train)
         # copy back the original value
         executor.arg_dict[k][:] = as_stype(old_value, stype, dtype=dtype)
 
@@ -776,7 +776,7 @@ def plot(v, i, k, executor, stype, dtype, aux_states, use_forward_train):
     fx = executor.outputs[0].asnumpy().ravel()
     #prev = None
     #while eps<0.1:
-    for eps in np.linspace(-0.01,0.01,num=100):#0.00001,0.0001,0.0005,0.001,0.005,0.01,0.05,0.1]:
+    for eps in np.linspace(-0.001,0.001,num=100):#0.00001,0.0001,0.0005,0.001,0.005,0.01,0.05,0.1]:
         #f = [None, None]
         for s in [1]:
             arg = origval + eps
@@ -862,10 +862,10 @@ def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rto
         """
         # random_projection should not have elements too small,
         # otherwise too much precision is lost in numerical gradient
-        #plain = _rng.rand(*shape) + 0.1
+        plain = _rng.rand(*shape) + 0.1
         #print('project matrix')
         #print(plain)
-        plain = np.array([[[[ 1.08638242,0.56417228],[ 0.87289977,0.20439213]],[[ 1.05770397,0.59018026],[ 0.27269412,0.54180449]],[[ 0.72418102,0.89063007],[ 0.82465786,0.31650403]]],[[[ 0.46155026,0.5963228 ],[ 0.3224153,0.39861413]],[[ 0.3214724,0.18116414],[ 0.93470868,0.1856888 ]],[[ 0.42946642,1.04903208],[ 0.36165658,0.30361473]]]])
+        #plain = np.array([[[[ 1.08638242,0.56417228],[ 0.87289977,0.20439213]],[[ 1.05770397,0.59018026],[ 0.27269412,0.54180449]],[[ 0.72418102,0.89063007],[ 0.82465786,0.31650403]]],[[[ 0.46155026,0.5963228 ],[ 0.3224153,0.39861413]],[[ 0.3214724,0.18116414],[ 0.93470868,0.1856888 ]],[[ 0.42946642,1.04903208],[ 0.36165658,0.30361473]]]])
         #plain = np.array([[[[ 0.73940294,0.28513131],[ 1.04177367,1.0556845 ]],[[ 0.60635233,0.45350347],[ 0.94453292,0.43643034]],[[ 0.74456322,0.16554625],[ 1.0119915,0.25267912]]],[[[ 0.51310362,0.52634561],[ 0.31740987,0.98324215]],[[ 0.78842111,0.15905102],[ 0.76894983,0.8079662 ]],[[ 0.91553723,0.76397728],[ 0.29263716,0.56087584]]]])
         return plain
 
@@ -902,7 +902,7 @@ def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rto
     #print('that was location')   
     args_grad_npy = dict([(k, _rng.normal(0, 0.01, size=location[k].shape)) for k in grad_nodes]
                          + [("__random_proj", _rng.normal(0, 0.01, size=out_shape[0]))])
-    args_grad_npy['__random_proj']=np.array([[[[ -1.90395085e-03,   9.45161303e-05],
+    '''args_grad_npy['__random_proj']=np.array([[[[ -1.90395085e-03,   9.45161303e-05],
          [  4.52657155e-03,   9.45033068e-03]],
 
         [[  1.35008896e-02,   3.32625691e-03],
@@ -947,7 +947,7 @@ def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rto
    # args_grad_npy['batchnorm_v128_beta']=np.array([ 0.00621224,  0.01071717,  0.00392615])
     print(args_grad_npy)
     assert(len(args_grad_npy)==4)
-
+    '''
     args_grad = {k: mx.nd.array(v, ctx=ctx, dtype=dtype) for k, v in args_grad_npy.items()}
     if grad_stype_dict is not None:
         assert isinstance(grad_stype_dict, dict), "grad_stype_dict must be a dict"
@@ -974,7 +974,7 @@ def check_numeric_gradient(sym, location, aux_states=None, numeric_eps=1e-3, rto
     numeric_gradients = numeric_grad(
         executor, location_npy, aux_states_npy,
         eps=numeric_eps, use_forward_train=use_forward_train, dtype=dtype)
-    print ('symb grad', symbolic_grads)
+    #print ('symb grad', symbolic_grads)
     for name in grad_nodes:
         fd_grad = numeric_gradients[name]
         orig_grad = args_grad_npy[name]

@@ -886,20 +886,28 @@ def test_nearest_upsampling():
 
 def test_batchnorm_training():
     def check_batchnorm_training(stype):
-        for shape in [(2, 3, 2, 2)]:
+        for shape in [(2,3),(2, 3, 2, 2)]:
+            #data_tmp = np.random.normal(-0.1, 0.1, size=shape)
             data_tmp = np.load('data_tmp.npy')
             s = shape[1],
             gamma = np.ones(s)
             beta = np.ones(s)
             gamma[1] = 3
             beta[0] = 3
-            print(data_tmp)
+            #print(data_tmp)
             #np.save('data_tmp',data_tmp)
-            rolling_mean = np.array([0.41657404, 0.625634, 0.54921245])
-            rolling_std = np.array([0.54226136, 0.2317358, 0.28460933])
+            rolling_mean = mx.nd.random_uniform(shape=s,dtype='float32').asnumpy()
+            rolling_std = mx.nd.random_uniform(shape=s,dtype='float32').asnumpy() 
+            #rolling_mean = np.array([0.41657404, 0.625634, 0.54921245])
+            #rolling_std = np.array([0.54226136, 0.2317358, 0.28460933])
            # print(rolling_mean)
            # print(rolling_std)
-            data = mx.symbol.Variable('data', stype=stype)
+            data = mx.symbol.Variable('data', stype=stype, dtype='float32')
+            #data_t = mx.nd.random_uniform(-0.01,0.01,shape=shape,dtype='float32',name='data')
+            
+            #data_tmp = data_t.asnumpy()
+            #print(data_t, data_tmp.dtype)
+#            np.save('data_tmp_64',data_tmp)
             in_location = [mx.nd.array(data_tmp).tostype(stype), mx.nd.array(gamma).tostype(stype),
                            mx.nd.array(beta).tostype(stype)]
             mean_std = [mx.nd.array(rolling_mean).tostype(stype), mx.nd.array(rolling_std).tostype(stype)]
