@@ -29,7 +29,7 @@ def check_diff_to_scalar(A, x, rank=None):
 
 keys = [3, 5, 7]
 # let the last shape exceed MXNET_KVSTORE_BIGARRAY_BOUND
-shapes = [(4, 4), (100, 100), (2000, 2000)];
+shapes = [(4, 4), (100, 100), (2000, 2000)]
 
 lr = .1
 nworker = 4
@@ -60,14 +60,59 @@ def test_kvstore(kv_type):
             err = sum(err) / np.sum(np.abs(res[j]))
             assert(err < 1e-6), (err, shapes[j])
 
-def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
-    print(kv_type + ' with ' + compress + ' compression')
+def test_compress_kvstore(kv_type, compression='2bit', threshold=0.5):
+    print(kv_type + ' with ' + compression + ' compression')
     rate = 2
     kv = mx.kv.create(kv_type)
-    kv.set_compress({'compress':compress, 'neg_threshold':neg, 'pos_threshold':pos})
+    kv.set_gradient_compression({'compression':compression, 'threshold':threshold})
     kv.set_optimizer(mx.optimizer.create('test', rescale_grad=rate))
     for k, s in zip(keys, shapes):
         kv.init(k, mx.nd.zeros(s))
+
+    def compute_expected(arr, curr_residual, threshold):
+        from struct import pack,unpack
+        def bits2int(bits):
+            bits = [int(x) for x in bits[::-1]]
+            x = 0
+            for i in range(len(bits)):
+                x += bits[i]*2**i
+            return x
+
+        def as_float32(s):
+            return unpack("f",pack("I", bits2int(s)))[0]
+
+        # str_quant stores the quantized representation as a sequence of bits
+        str_quant = ''
+        new_residual = []
+        decompr = []
+        arr_npy = arr.asnumpy()
+        curr_res_npy = curr_residual.asnumpy()
+        for i, a in np.ndenumerate(arr_npy):
+            a += curr_res_npy[i]
+            if a >= threshold:
+                str_quant += '11'
+                new_residual.append(a - threshold)
+                decompr.append(threshold)
+            elif a <= (-1*threshold):
+                str_quant += '10'
+                new_residual.append(a + threshold)
+                decompr.append(-1*threshold)
+            else:
+                str_quant += '00'
+                new_residual.append(a)
+                decompr.append(0)
+        # append extra bits when size of array not a factor of 16
+        if len(str_quant)%16 != 0:
+            str_quant += '0'*(16 - len(str_quant)%16)
+
+        compr = []
+        # converts the string generated into integers 32chars at a time
+        i = 0
+        while i<len(str_quant):
+            cur_float = str_quant[i+24:i+32] + str_quant[i+16:i+24] + str_quant[i+8:i+16] + str_quant[i:i+8]
+            compr.append(as_float32(cur_float))
+            i+=32
+        return compr, new_residual, decompr
 
     def pull_before_push(kv):
         for i in range(nrepeat):
@@ -88,7 +133,7 @@ def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
                 for o in out:
                     assert_almost_equal(o.asnumpy(), exp)
 
-    def verify_residual(kv, neg_threshold, pos_threshold, rate):
+    def verify_residual(kv, threshold, rate):
         for j in range(len(keys)):
             kv.push(keys[j], [mx.nd.ones(shapes[j], mx.gpu(g))*0.4 for g in range(nworker)])
             out = [mx.nd.zeros(shapes[j], mx.gpu(g)) for g in range(nworker)]
@@ -96,10 +141,10 @@ def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
             for o in out:
                 check_diff_to_scalar(o, 0)
 
-            kv.push(keys[j], [mx.nd.ones(shapes[j], mx.gpu(g))*(pos_threshold-0.3) for g in range(nworker)])
+            kv.push(keys[j], [mx.nd.ones(shapes[j], mx.gpu(g))*(threshold-0.3) for g in range(nworker)])
             out = [mx.nd.zeros(shapes[j], mx.gpu(g)) for g in range(nworker)]
             kv.pull(keys[j],out=out)
-            curval = pos_threshold * rate * nworker
+            curval = threshold * rate * nworker
             for o in out:
                 check_diff_to_scalar(o, curval)
 
@@ -109,10 +154,10 @@ def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
             for o in out:
                 check_diff_to_scalar(o, curval)
 
-            kv.push(keys[j], [mx.nd.ones(shapes[j], mx.gpu(g))*(pos_threshold-0.3) for g in range(nworker)])
+            kv.push(keys[j], [mx.nd.ones(shapes[j], mx.gpu(g))*(threshold-0.3) for g in range(nworker)])
             out = [mx.nd.zeros(shapes[j], mx.gpu(g)) for g in range(nworker)]
             kv.pull(keys[j],out=out)
-            curval += pos_threshold*rate*nworker
+            curval += threshold*rate*nworker
             for o in out:
                 check_diff_to_scalar(o, curval)
             # residual would be 0 now
@@ -129,37 +174,38 @@ def test_compress_kvstore(kv_type, compress='2bit', neg=-0.5, pos=0.5):
                     check_diff_to_scalar(o, curval)
             # residual would be 0 again
 
-    def check_compr_random(kv, pos, neg):
-        for j in range(len(keys)):
-            orig_val = [mx.nd.zeros(shapes[j], mx.gpu(g)) for g in range(nworker)]
-            kv.pull(keys[j], out=orig_val)
+    def check_compr_random(kv, threshold):
+        # use new keys so we can track residual
+        random_keys = [13, 15, 17]
+        for k, s in zip(random_keys, shapes):
+            kv.init(k, mx.nd.zeros(s))
+        for j in range(len(random_keys)):
+            curr_residual = np.zeros(shapes[j])
+            for l in range(nrepeat):
+                orig_val = [mx.nd.zeros(shapes[j], mx.gpu(g)) for g in range(nworker)]
+                kv.pull(keys[j], out=orig_val)
 
-            grads = [mx.nd.random_uniform(-0.6,0.6, shape=shapes[j], ctx=mx.gpu(g)) for g in range(nworker)]
-            kv.push(keys[j], grads)
-            val = [mx.nd.zeros(shapes[j], mx.gpu(g)) for g in range(nworker)]
-            kv.pull(keys[j], out=val)
+                grads = [mx.nd.random_uniform(-0.6,0.6, shape=shapes[j], ctx=mx.gpu(g)) for g in range(nworker)]
+                kv.push(keys[j], grads)
+                val = [mx.nd.zeros(shapes[j], mx.gpu(g)) for g in range(nworker)]
+                kv.pull(keys[j], out=val)
 
-            diff = [val[g] - orig_val[g] for g in range(nworker)]
-            # compute expected by directly using operators
-            comprs = []
-            decomprs = []
-            # on cpu
-            sum_dequantized_vals = np.zeros(shapes[j])
-            for g in range(nworker):
-                comprs.append(mx.contrib.nd.create_2bit(grads[g]))
-                decomprs.append(mx.nd.zeros(grads[g].shape, ctx=mx.gpu(g)))
-                mx.contrib.ndarray.quantize_2bit(grads[g], mx.nd.zeros(shapes[j], ctx=mx.gpu(g)), comprs[g], neg, pos)
-                mx.contrib.ndarray.dequantize_2bit(comprs[g], decomprs[g])
-                sum_dequantized_vals += ((decomprs[g]*rate).asnumpy())
-            for g in range(nworker):
-                assert_almost_equal(diff[g].asnumpy(), sum_dequantized_vals)
-        # residual is random now, cant repeat
+                diffs = [val[g] - orig_val[g] for g in range(nworker)]
+                # compute expected by using simulation of operator
+                # on cpu
+                sum_dequantized_vals = np.zeros(shapes[j])
+                for g in range(nworker):
+                    compr, curr_residual, decompr = compute_expected(grads[g], curr_residual, threshold)
+                    sum_dequantized_vals += ((decompr*rate).asnumpy())
+
+                for g in range(nworker):
+                    assert_almost_equal(diffs[g].asnumpy(), sum_dequantized_vals)
 
     pull_before_push(kv)
     push_zeros(kv)
-    curval = verify_residual(kv, neg, pos, rate)
-    check_neg(kv, neg, rate, curval)
-    check_compr_random(kv, pos, neg)
+    curval = verify_residual(kv, threshold, rate)
+    check_neg(kv, -1*threshold, rate, curval)
+    check_compr_random(kv, threshold)
 
 test_kvstore('local_update_cpu')
 test_kvstore('local_allreduce_cpu')

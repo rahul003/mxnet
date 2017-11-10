@@ -65,10 +65,10 @@ nnvm::Symbol NDArray::get_autograd_symbol() const {
 
 NDArray NDArray::Reshape(const TShape &shape) const {
   CHECK(!is_none()) << "NDArray is not initialized";
-  CHECK(storage_type() == kDefaultStorage) << "Reshape for storage type " <<
-        storage_type() << " is not implemented yet";
-  CHECK(storage_type() == kDefaultStorage) << "Reshape for storage type " <<
-        storage_type() << " is not implemented yet";
+  auto stype = storage_type();
+  // reshape is not supported for non-default ndarray with dismatching shapes
+  CHECK((shape_ == shape) || stype == kDefaultStorage)
+    << "Reshape for storage type " << stype << " is not implemented yet";
   CHECK_GE(shape_.Size(), shape.Size())
     << "NDArray.Reshape: target shape size is larger current shape";
   NDArray ret = this->Detach();
@@ -549,101 +549,6 @@ void CopyFromTo(const NDArray& from, const NDArray& to, int priority) {
         }, from.ctx(), const_vars, {to.var()},
         from.dtype() != to.dtype() ? FnProperty::kNormal : FnProperty::kCopyFromGPU,
         priority, PROFILER_MESSAGE("CopyGPU2GPU"));
-    } else {
-      LOG(FATAL) << "unknown device mask";
-    }
-#else
-    LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
-#endif
-  }
-}
-
-void Quantize(const NDArray &from, NDArray *to, NDArray *residual, const std::string& compress,
-              const float neg_threshold, const float pos_threshold,
-              int priority) {
-  CHECK(from.shape().ndim() != 0)
-      << "source operands have zero dimension shape";
-  // important: callback must always capture by value
-  NDArray ret = *to;
-  NDArray res = *residual;
-  int a = from.ctx().dev_mask();
-  int b = to->ctx().dev_mask();
-  if (a == cpu::kDevMask && b == cpu::kDevMask) {
-    if (compress == "2bit") {
-      Engine::Get()->PushSync([from, res, ret, neg_threshold, pos_threshold](RunContext ctx) {
-          std::vector<TBlob> inputs(3);
-          inputs[0] = from.data();
-          inputs[1] = res.data();
-          inputs[2] = ret.data();
-          mxnet::ndarray::Quantize2BitDispatch<cpu>(ctx.get_stream<cpu>(), inputs,
-                                                    neg_threshold, pos_threshold);
-        }, from.ctx(), {from.var()}, {ret.var(), res.var()},
-        FnProperty::kNormal, priority, PROFILER_MESSAGE("QuantizeCPU"));
-    } else {
-      LOG(FATAL) << "Unsupported Quantization";
-    }
-  } else {
-#if MXNET_USE_CUDA
-    if (a == gpu::kDevMask && b == gpu::kDevMask) {
-      if (compress == "2bit") {
-        Engine::Get()->PushSync([from, res, ret, neg_threshold, pos_threshold](RunContext ctx) {
-            std::vector<TBlob> inputs(3);
-            inputs[0] = from.data();
-            inputs[1] = res.data();
-            inputs[2] = ret.data();
-            mxnet::ndarray::Quantize2BitDispatch<gpu>(ctx.get_stream<gpu>(), inputs,
-                                                      neg_threshold, pos_threshold);
-            // Wait GPU kernel to complete
-            ctx.get_stream<gpu>()->Wait();
-          }, from.ctx(), {from.var()}, {ret.var(), res.var()},
-          FnProperty::kNormal, priority, PROFILER_MESSAGE("QuantizeGPU"));
-        } else {
-          LOG(FATAL) << "Unsupported Quantization";
-        }
-    } else {
-      LOG(FATAL) << "unknown device mask";
-    }
-#else
-    LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
-#endif
-  }
-}
-
-void Dequantize(const NDArray &from, NDArray *to, const std::string& compress, int priority) {
-  CHECK(from.shape().ndim() != 0)
-    << "source operands have zero dimension shape";
-  // important: callback must always capture by value
-  NDArray ret = *to;
-  int a = from.ctx().dev_mask();
-  int b = to->ctx().dev_mask();
-  if (a == cpu::kDevMask && b == cpu::kDevMask) {
-    if (compress == "2bit") {
-      Engine::Get()->PushSync([from, ret](RunContext ctx) {
-        std::vector<TBlob> inputs(2);
-        inputs[0] = from.data();
-        inputs[1] = ret.data();
-        mxnet::ndarray::Dequantize2BitDispatch<cpu>(ctx.get_stream<cpu>(), inputs);
-      }, from.ctx(), {from.var()}, {ret.var()},
-      FnProperty::kNormal, priority, PROFILER_MESSAGE("DequantizeCPU"));
-    } else {
-      LOG(FATAL) << "Unsupported dequantization " << compress << std::endl;
-    }
-  } else {
-#if MXNET_USE_CUDA
-    if (a == gpu::kDevMask && b == gpu::kDevMask) {
-      if (compress == "2bit") {
-        Engine::Get()->PushSync([from, ret](RunContext ctx) {
-          std::vector<TBlob> inputs(2);
-          inputs[0] = from.data();
-          inputs[1] = ret.data();
-          mxnet::ndarray::Dequantize2BitDispatch<gpu>(ctx.get_stream<gpu>(), inputs);
-          // Wait GPU kernel to complete
-          ctx.get_stream<gpu>()->Wait();
-        }, from.ctx(), {from.var()}, {ret.var()},
-        FnProperty::kNormal, priority, PROFILER_MESSAGE("DequantizeGPU"));
-      } else {
-        LOG(FATAL) << "Unsupported dequantization " << compress << std::endl;
-      }
     } else {
       LOG(FATAL) << "unknown device mask";
     }

@@ -1614,12 +1614,13 @@ def test_transpose():
 
 def test_expand_dims():
     for ndim in range(1, 6):
-        for t in range(5):
-            dims = list(np.random.randint(1, 10, size=ndim))
-            axis = np.random.randint(1, ndim+1)
-            x = mx.nd.array(np.random.normal(size=dims))
-            y = mx.nd.expand_dims(x, axis=axis)
-            assert_allclose(np.expand_dims(x.asnumpy(), axis=axis), y.asnumpy())
+        for axis in range(-ndim + 1, ndim):
+            x = np.random.normal(size=list(np.random.randint(1, 10, size=ndim)))
+            y = mx.nd.array(x)
+            x1 = np.expand_dims(x, axis=axis)
+            y1 = mx.nd.expand_dims(y, axis=axis)
+            assert_allclose(x1, y1.asnumpy())
+            assert_allclose(x1.shape, y1.shape)
 
 
 def test_crop():
@@ -2555,6 +2556,7 @@ def test_init():
                        (0, 10),
                        (5, 100, 4),
                        (50, -50, -2),
+                       (-100, 100, 1),
                        (1.3, 456.6, 1.3)]
         for dtype in dtype_list:
             for config in config_list:
@@ -3536,6 +3538,7 @@ def test_quantization_op():
     assert same(qa.asnumpy(), qa_real.asnumpy())
     assert same(a_.asnumpy(),  a_real.asnumpy())
 
+
 def test_reciprocal_op():
     data_tmp = np.random.rand(3, 4) * 10 - 5
     # Avoid possible division by 0 errors
@@ -4133,9 +4136,11 @@ def _syevd_backward(grad_u, grad_l, u, l):
     return np.dot(temp3, u)
 
 def test_laop_3():
-    # Operators implemented for CPU only currently
+    # Currently disabled on GPU as syevd needs cuda8
+    # and MxNet builds use cuda 7.5
     if not (default_context() == mx.cpu()):
         return
+
     np.random.seed(1896893923)
     dtype = np.float64
     rtol_fw = 1e-6
@@ -4147,7 +4152,6 @@ def test_laop_3():
     grad_check = 1
 
     data1 = mx.symbol.Variable('data1')
-
     check_fw = lambda sym, location, expected :\
         check_symbolic_forward(sym, location, expected, rtol=rtol_fw,
                                atol=atol_fw, dtype=dtype)
@@ -4199,13 +4203,12 @@ def test_laop_3():
             check_grad(test_syevd_l_4, [a_batch])
 
 
-# Note: Currently, linalg.syevd is activated for float64 only, due to the issues
-# demonstrated by this unit test. For this reason, the second part of this test
-# (float32) is deactivated for now.
 def test_laop_4():
-    # Operators implemented for CPU only currently
-    if not(default_context() == mx.cpu()):
+    # Currently disabled on GPU as syevd needs cuda8
+    # and MxNet builds use cuda 7.5
+    if not (default_context() == mx.cpu()):
         return
+
     np.random.seed(1896893923)
     rtol_fw = 1e-6
     atol_fw = 1e-6
@@ -4225,7 +4228,7 @@ def test_laop_4():
     check_fw(test_syevd, [a_np], [u_np, l_np], np.float64)
     # float32
     #print('float32')
-    #check_fw(test_syevd, [a_np], [u_np, l_np], np.float32)
+    check_fw(test_syevd, [a_np], [u_np, l_np], np.float32)
 
 
 def test_stack():
@@ -4308,101 +4311,6 @@ def test_scatter_gather_nd():
 
     assert (mx.nd.scatter_nd(data, idx, shape=(2, 2)).asnumpy() == [[0, 0], [2, 3]]).all()
 
-def test_two_bit_quantization():
-    neg_threshold = -0.5
-    pos_threshold = 0.5
-    orig_shape = [(25,),(16,),(1121),(14400)]
-    num_repeat = 1
-    from struct import pack,unpack
-
-    def bits2int(bits):
-        bits = [int(x) for x in bits[::-1]]
-        x = 0
-        for i in range(len(bits)):
-            x += bits[i]*2**i
-        return x
-
-    def as_float32(s):
-        return unpack("f",pack("I", bits2int(s)))[0]
-
-    def compute_expected(arr, neg, pos, curr_residual):
-        # str_quant stores the quantized representation as a sequence of bits
-        str_quant = ''
-        new_residual = []
-        decompr = []
-        arr_npy = arr.asnumpy()
-        curr_res_npy = curr_residual.asnumpy()
-        for i, a in np.ndenumerate(arr_npy):
-            a += curr_res_npy[i]
-            if a >= pos:
-                str_quant += '10'
-                new_residual.append(a - pos)
-                decompr.append(pos)
-            elif a <= neg:
-                str_quant += '01'
-                new_residual.append(a - neg)
-                decompr.append(neg)
-            else:
-                str_quant += '00'
-                new_residual.append(a)
-                decompr.append(0)
-        # append extra bits when size of array not a factor of 16
-        if len(str_quant)%16 != 0:
-            str_quant += '0'*(16 - len(str_quant)%16)
-
-        compr = [neg, pos, len(arr)]
-        # converts the string generated into integers 32chars at a time
-        i = 0
-        while i<len(str_quant):
-            cur_float = str_quant[i+24:i+32] + str_quant[i+16:i+24] + str_quant[i+8:i+16] + str_quant[i:i+8]
-            compr.append(as_float32(cur_float))
-            i+=32
-        return compr, new_residual, decompr
-
-    def check(grad, residual):
-        exp_compr, exp_residual, exp_decompr = compute_expected(grad, neg_threshold, pos_threshold, residual)
-        compr = mx.contrib.nd.create_2bit(grad)
-        mx.contrib.ndarray.quantize_2bit(grad, residual, compr, neg_threshold, pos_threshold)
-        decompr = mx.nd.zeros(grad.shape)
-        mx.contrib.ndarray.dequantize_2bit(compr, decompr)
-        assert np.array_equal(compr.asnumpy(), np.array(exp_compr)) , (compr, exp_compr)
-        assert np.array_equal(decompr.asnumpy(), np.array(exp_decompr)) , (decompr, exp_decompr)
-        # use almost equal for residual as this involves addition operation
-        assert_almost_equal(residual.asnumpy(), np.array(exp_residual)) , (residual, exp_residual)
-
-    def zerodata(shape):
-        # all 0s
-        grad = mx.nd.zeros(shape)
-        residual = mx.nd.zeros(grad.shape)
-        return grad, residual
-
-    def onesdata(shape):
-        # all 1s
-        grad = mx.nd.ones(shape)
-        residual = mx.nd.zeros(grad.shape)
-        return grad, residual
-
-    def random_data(shape):
-        # push random data and residual
-        grad = mx.nd.random_uniform(-0.9,0.9, shape=shape, ctx=default_context())
-        residual = mx.nd.random_uniform(-0.6,0.6, shape=shape, ctx=default_context())
-        return grad, residual
-
-    def random_large_range(shape):
-        grad = mx.nd.random_uniform(-2,2, shape=shape, ctx=default_context())
-        residual = mx.nd.random_uniform(-2,2, shape=shape, ctx=default_context())
-        return grad, residual
-
-    for shape in orig_shape:
-        for i in range(num_repeat):
-            data = []
-            data.append(zerodata(shape))
-            data.append(onesdata(shape))
-            data.append(random_data(shape))
-            data.append(random_large_range(shape))
-            for d in data:
-                check(d[0], d[1])
-
 def compare_forw_backw_unary_op(
         name, forward_mxnet_call, forward_numpy_call,
         backward_numpy_call, shape, input_low, input_high, rtol, atol,
@@ -4442,6 +4350,16 @@ def finite_diff_unary_op(
         forward_mxnet_call(data), mx.sym.zeros_like(data),
         name=op_name)
     check_grad(op_ex, [data_np])
+
+def np_smooth_l1(x, sigma):
+    issq = 1. / sigma / sigma
+    absx = np.abs(x)
+    temp = x * sigma
+    return np.where(absx < issq, 0.5 * (temp ** 2), absx - 0.5 * issq)
+
+def np_smooth_l1_grad(x, sigma):
+    ssq = sigma * sigma
+    return np.where(np.abs(x) < 1. / ssq, x * ssq, np.sign(x))
 
 # Tests for unary operators (basic mathematical functions):
 # - Forward: Comparison to NumPy (several dtype)
@@ -4564,7 +4482,15 @@ def test_unary_math_operators():
         'tanh': [lambda x: mx.sym.tanh(x),
                  lambda x: np.tanh(x),
                  lambda x: 1. - np.tanh(x) ** 2,
-                 -4.0, 4.0]
+                 -4.0, 4.0],
+        'smooth_l1_sig1': [lambda x: mx.sym.smooth_l1(x, scalar=1.),
+                           lambda x: np_smooth_l1(x, 1.),
+                           lambda x: np_smooth_l1_grad(x, 1.),
+                           -2.0, 2.0],
+        'smooth_l1_sig2': [lambda x: mx.sym.smooth_l1(x, scalar=2.),
+                           lambda x: np_smooth_l1(x, 2.),
+                           lambda x: np_smooth_l1_grad(x, 2.),
+                           -1.0, 1.0]
     }
     if have_scipy:
         unary_ops['gamma'] = [lambda x: mx.sym.gamma(x),
@@ -4683,6 +4609,43 @@ def test_softmax():
     check_softmax_with_shape((3, 4, 2), default_context(), preserve_shape=True)
     check_softmax_grad(default_context())
     check_smoothed_softmax_grad(default_context())
+
+
+def test_slice():
+    def test_slice_forward_backward(a, index):
+        a_np = a.asnumpy()
+        begin = []
+        end = []
+        step = []
+        for slice_i in index:
+            begin.append(slice_i.start)
+            end.append(slice_i.stop)
+            step.append(slice_i.step)
+        b = mx.nd.slice(a, begin=begin, end=end, step=step)
+        b_np = a_np[index]
+        assert same(b.asnumpy(), b_np)
+
+        data = mx.sym.Variable('data')
+        slice_sym = mx.sym.slice(data, begin=begin, end=end, step=step)
+        expected_in_grad = np.zeros_like(a_np)
+        expected_in_grad[index] = b_np
+        check_symbolic_backward(slice_sym, [a_np], [b_np], [expected_in_grad])
+
+    shape = (16, 14, 17, 20)
+    arr = mx.nd.arange(np.prod(shape)).reshape(shape=shape)
+    index_list = [(slice(None),), (slice(None), slice(None)), (slice(1, 10),), (slice(1, 10), slice(3, 9)),
+                  (slice(1, 10), slice(2, 5), slice(3, 6), slice(7, 10)),
+                  (slice(1, 10, 2), slice(2, 9, 3), slice(3, 6, 5), slice(7, 10, 2)),
+                  (slice(None, None, -1), slice(None, None, -1), slice(None, None, -1)),
+                  (slice(10, 0, -2), slice(5, 2, -1), slice(7, None, 3), slice(None, 12, 4))]
+    for index in index_list:
+        test_slice_forward_backward(arr, index)
+
+    # check numeric gradient
+    in_data = np.arange(36).reshape(2, 2, 3, 3)
+    data = mx.sym.Variable('data')
+    slice_sym = mx.sym.slice(data, begin=[0, None], end=[1, None], step=[2, -1])
+    check_numeric_gradient(slice_sym, [in_data])
 
 
 if __name__ == '__main__':

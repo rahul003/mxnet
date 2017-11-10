@@ -103,6 +103,11 @@ def add_fit_args(parser):
                        help='1 means test reading speed without training')
     train.add_argument('--dtype', type=str, default='float32',
                        help='precision: float32 or float16')
+    train.add_argument('--gc-type', type=str, default='none',
+                       help='type of gradient compression to use, \
+                             takes `2bit` or `none` for now')
+    train.add_argument('--gc-threshold', type=float, default=0.5,
+                       help='threshold for 2bit gradient compression')
     return train
 
 def fit(args, network, data_loader, **kwargs):
@@ -114,7 +119,7 @@ def fit(args, network, data_loader, **kwargs):
     """
     # kvstore
     kv = mx.kvstore.create(args.kv_store)
-
+    kv.set_gradient_compression({'compression':args.gc_type, 'threshold':args.gc_threshold})
     # logging
     head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
     logging.basicConfig(level=logging.DEBUG, format=head)

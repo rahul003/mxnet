@@ -18,23 +18,21 @@
  */
 
 /*!
- * \file two_bit_quantize_sim.cu
- * \brief registers quantize_2bit, dequantize_2bit
- * and create_2bit operators for GPU
+ * \file gc.cu
+ * \author Rahul Huilgol
+ * \brief Implementation for gpu version of code
  */
-#include "./two_bit_quantize-inl.h"
+
+#include "./gc-inl.h"
 
 namespace mxnet {
-namespace op {
+namespace kvstore {
+void Quantize2BitImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& inputs, const float threshold) {
+  Quantize2BitKernelLaunch(s, inputs, threshold);
+}
 
-NNVM_REGISTER_OP(_contrib_quantize_2bit)
-.set_attr<FCompute>("FCompute<gpu>", Quantize2BitCompute<gpu>);
-
-NNVM_REGISTER_OP(_contrib_dequantize_2bit)
-.set_attr<FCompute>("FCompute<gpu>", Dequantize2BitCompute<gpu>);
-
-NNVM_REGISTER_OP(_contrib_create_2bit)
-.set_attr<FCompute>("FCompute<gpu>", Create2BitArrayCompute<gpu>);
-
-}  // namespace op
-}  // namespace mxnet
+void Dequantize2BitImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& inputs, const float threshold) {
+  Dequantize2BitKernelLaunch(s, inputs, threshold);
+}
+} // namespace kvstore
+} // namespace mxnet
