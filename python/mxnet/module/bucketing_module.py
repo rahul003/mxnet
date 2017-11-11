@@ -55,7 +55,7 @@ class BucketingModule(BaseModule):
     """
     def __init__(self, sym_gen, default_bucket_key=None, logger=logging,
                  context=ctx.cpu(), work_load_list=None,
-                 fixed_param_names=None, state_names=None):
+                 fixed_param_names=None, state_names=None, compression_params=None):
         super(BucketingModule, self).__init__(logger=logger)
 
         assert default_bucket_key is not None
@@ -78,6 +78,7 @@ class BucketingModule(BaseModule):
         self._context = context
         self._work_load_list = work_load_list
 
+        self._compression_params = compression_params
         self._buckets = {}
         self._curr_module = None
         self._curr_bucket_key = None
@@ -319,7 +320,7 @@ class BucketingModule(BaseModule):
         module = Module(symbol, data_names, label_names, logger=self.logger,
                         context=self._context, work_load_list=self._work_load_list,
                         fixed_param_names=self._fixed_param_names,
-                        state_names=self._state_names)
+                        state_names=self._state_names, compression_params=self._compression_params)
         module.bind(data_shapes, label_shapes, for_training, inputs_need_grad,
                     force_rebind=False, shared_module=None, grad_req=grad_req)
         self._curr_module = module
@@ -349,7 +350,7 @@ class BucketingModule(BaseModule):
                             logger=self.logger, context=self._context,
                             work_load_list=self._work_load_list,
                             fixed_param_names=self._fixed_param_names,
-                            state_names=self._state_names)
+                            state_names=self._state_names, compression_params=self._compression_params)
             module.bind(data_shapes, label_shapes, self._curr_module.for_training,
                         self._curr_module.inputs_need_grad,
                         force_rebind=False, shared_module=self._buckets[self._default_bucket_key])

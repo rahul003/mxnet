@@ -312,15 +312,15 @@ if __name__ == '__main__':
             module = STTBucketingModule(
                 sym_gen=model_loaded,
                 default_bucket_key=data_train.default_bucket_key,
-                context=contexts
-                )
+                context=contexts,
+                compression_params={'compression':args.config.get('train','compress'), 'threshold':args.config.getfloat('train','pos_threshold')})
         else:
             print('setting compress as ',args.config.get('train','compress'))
             data_names = [x[0] for x in data_train.provide_data]
             label_names = [x[0] for x in data_train.provide_label]
             module = mx.module.Module(model_loaded, context=contexts,
                                    data_names=data_names, label_names=label_names, 
-                                   compression_params={'compression':args.config.get('train','compress'), 'threshold':args.config.getfloat('train','pos_threshold'), 'neg_threshold':args.config.getfloat('train','neg_threshold')})
+                                   compression_params={'compression':args.config.get('train','compress'), 'threshold':args.config.getfloat('train','pos_threshold')})
         do_training(args=args, module=module, data_train=data_train, data_val=data_val)
     # if mode is 'load', it loads model from the checkpoint and continues the training.
     elif mode == 'load':
