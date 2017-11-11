@@ -321,7 +321,7 @@ if __name__ == '__main__':
             label_names = [x[0] for x in data_train.provide_label]
             module = mx.module.Module(model_loaded, context=contexts,
                                    data_names=data_names, label_names=label_names, 
-                                   compress_params={'compress':args.config.get('train','compress'), 'pos_threshold':args.config.getfloat('train','pos_threshold'), 'neg_threshold':args.config.getfloat('train','neg_threshold')})
+                                   compression_params={'compression':args.config.get('train','compress'), 'threshold':args.config.getfloat('train','pos_threshold'), 'neg_threshold':args.config.getfloat('train','neg_threshold')})
         do_training(args=args, module=module, data_train=data_train, data_val=data_val)
     # if mode is 'load', it loads model from the checkpoint and continues the training.
     elif mode == 'load':
