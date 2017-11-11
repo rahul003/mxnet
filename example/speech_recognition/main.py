@@ -308,7 +308,6 @@ if __name__ == '__main__':
     # if mode is 'train', it trains the model
     if mode == 'train':
         if is_bucketing:
-            assert False
             module = STTBucketingModule(
                 sym_gen=model_loaded,
                 default_bucket_key=data_train.default_bucket_key,
