@@ -438,12 +438,13 @@ class KVStoreDistServer {
       dshape = TShape{(int64_t) original_size};
 
       std::vector<NDArray> decomp_bufs = decomp_buf_[key];
+      int num_workers = ps::NumWorkers();
       if (decomp_buf_[key].empty()) {
-        for (size_t i=0; size_t < ps::NumWorkers(); i++) {
+        for (size_t i=0; i < num_workers; i++) {
           decomp_bufs.push_back(NDArray(dshape, Context()));
         }
       }
-
+      NDArray cur_decomp_buf = decomp_bufs[req_meta.sender];
       if (stored.is_none()) {
         stored = NDArray(dshape, Context());
         gradient_compression_->Dequantize(recved, &stored, 0);
@@ -456,19 +457,19 @@ class KVStoreDistServer {
           merged.array = NDArray(dshape, Context());
         }
         if (merged.request.size() == 0) {
-          gradient_compression_->Dequantize(recved, &merged.array, 0);
+          gradient_compression_->Dequantize(recved, &(merged.array), 0);
         } else {
-          gradient_compression_->Dequantize(recved, &decomp_bufs[req_meta.sender], 0);
+          gradient_compression_->Dequantize(recved, &cur_decomp_buf, 0);
 //          merged.array += decomp_bufs[req_meta.sender];
         }
         merged.request.push_back(req_meta);
         ApplyUpdatesGC(key, &merged, &stored, decomp_bufs[req_meta.sender], server);
       } else {
         // async push
-        gradient_compression_->Dequantize(recved, &decomp_bufs[req_meta.sender], 0);
-        exec_.Exec([this, key, &decomp_bufs[req_meta.sender], &stored]() {
+        gradient_compression_->Dequantize(recved, &cur_decomp_buf, 0);
+        exec_.Exec([this, key, &cur_decomp_buf, &stored]() {
           CHECK(updater_);
-          updater_(key, decomp_bufs[req_meta.sender], &stored);
+          updater_(key, cur_decomp_buf, &stored);
         });
         server->Response(req_meta);
         stored.WaitToRead();
