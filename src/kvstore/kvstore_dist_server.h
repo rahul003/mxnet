@@ -444,7 +444,8 @@ class KVStoreDistServer {
           decomp_bufs.push_back(NDArray(dshape, Context()));
         }
       }
-      NDArray cur_decomp_buf = decomp_bufs[req_meta.sender];
+      int rank = ps::Postoffice::IDtoRank(req_meta.sender);
+      NDArray cur_decomp_buf = decomp_bufs[rank];
       if (stored.is_none()) {
         stored = NDArray(dshape, Context());
         gradient_compression_->Dequantize(recved, &stored, 0);
@@ -463,7 +464,7 @@ class KVStoreDistServer {
 //          merged.array += decomp_bufs[req_meta.sender];
         }
         merged.request.push_back(req_meta);
-        ApplyUpdatesGC(key, &merged, &stored, decomp_bufs[req_meta.sender], server);
+        ApplyUpdatesGC(key, &merged, &stored, cur_decomp_buf, server);
       } else {
         // async push
         gradient_compression_->Dequantize(recved, &cur_decomp_buf, 0);
