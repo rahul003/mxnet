@@ -170,16 +170,16 @@ class KVStoreDistServer {
     app->Response(recved);
   }
 
-  void DataHandleEx(const ps::KVMeta& req_meta,
-                    const ps::KVPairs<real_t>& req_data,
+  void DataHandleEx(const std::shared_ptr<ps::KVMeta> req_meta,
+                    const std::shared_ptr<ps::KVPairs<real_t> > req_data,
                     ps::KVServer<real_t>* server) {
-    DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
+    DataHandleType recved_type = static_cast<DataHandleType>(req_meta->cmd);
     if (recved_type == DataHandleType::kRowSparsePushPull) {
-      DataHandleRowSparse(req_meta, req_data, server);
+      DataHandleRowSparse(*req_meta, *req_data, server);
     } else if (recved_type == DataHandleType::kCompressedPushPull) {
-      DataHandleCompressed(req_meta, req_data, server);
+      DataHandleCompressed(*req_meta, *req_data, server);
     } else {
-      DataHandleDefault(req_meta, req_data, server);
+      DataHandleDefault(*req_meta, *req_data, server);
     }
     return;
   }
@@ -187,26 +187,32 @@ class KVStoreDistServer {
   inline void ApplyUpdates(const int key, MergeBuf *merged, NDArray *stored,
                            ps::KVServer<real_t>* server) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
-      // let the main thread to execute updater_, which is necessary for python
-      if (updater_) {
-        exec_.Exec([this, key, merged, stored](){
-            CHECK(updater_);
-            updater_(key, merged->array, stored);
-          });
-      } else {
-        // if no updater, just copy
-        CopyFromTo(merged->array, stored);
-      }
-      if (log_verbose_)  {
-        LOG(INFO) << "sync response to " << merged->request.size() << " workers";
-      }
-      for (const auto& req : merged->request) {
-        server->Response(req);
-      }
-      merged->request.clear();
-      stored->WaitToRead();
+      mxnet::Engine::Get()->PushSync([key, merged, server, this, stored](mxnet::RunContext ctx) {
+//        std::cout<<"started applyupdates for key "<<key<<std::endl;
+         // let the main thread to execute updater_, which is necessary for python
+         if (updater_) {
+//           exec_.Exec([this, key, merged, stored](){
+             CHECK(updater_);
+             updater_(key, merged->array, stored);
+//           });
+         } else {
+           // if no updater, just copy
+           CopyFromTo(merged->array, stored);
+         }
+         if (log_verbose_)  {
+           LOG(INFO) << "sync response to " << merged->request.size() << " workers";
+         }
+         for (const auto& req : merged->request) {
+           server->Response(req);
+         }
+         merged->request.clear();
+//          std::cout<<"ended applyupdates for key "<<key<<std::endl;
+       }, stored->ctx(), {stored->var()}, {},
+       mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("ApplyUpdates"));
+
+//      stored->WaitToRead();
     } else {
-      merged->array.WaitToRead();
+//      merged->array.WaitToRead();
     }
   }
 
@@ -379,14 +385,17 @@ class KVStoreDistServer {
                               const ps::KVMeta& req_meta,
                               const ps::KVPairs<real_t> &req_data,
                               ps::KVServer<real_t>* server) {
-    ps::KVPairs<real_t> response;
-    CHECK(!stored.is_none()) << "init " << key << " first";
-    auto len = stored.shape().Size();
-    response.keys = req_data.keys;
-    response.lens = {len};
-    // TODO(mli) try to remove this CopyFrom
-    response.vals.CopyFrom(static_cast<const float*>(stored.data().dptr_), len);
-    server->Response(req_meta, response);
+    mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server](mxnet::RunContext ctx) {
+       ps::KVPairs<real_t> response;
+       CHECK(!stored.is_none()) << "init " << key << " first";
+       auto len = stored.shape().Size();
+       response.keys = req_data.keys;
+       response.lens = {len};
+       // TODO(mli) try to remove this CopyFrom
+       response.vals.CopyFrom(static_cast<const float*>(stored.data().dptr_), len);
+       server->Response(req_meta, response);
+     }, stored.ctx(), {stored.var()}, {},
+     mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("DefaultStorageResponse"));
   }
 
   void DataHandleCompressed(const ps::KVMeta& req_meta,
@@ -459,6 +468,7 @@ class KVStoreDistServer {
   void DataHandleDefault(const ps::KVMeta& req_meta,
                          const ps::KVPairs<real_t> &req_data,
                          ps::KVServer<real_t>* server) {
+//    std::cout<<"push received here"<<std::endl;
     CHECK_EQ(req_meta.cmd, static_cast<int>(DataHandleType::kDefaultPushPull));
     // do some check
     CHECK_EQ(req_data.keys.size(), (size_t)1);
@@ -470,9 +480,6 @@ class KVStoreDistServer {
     int key = DecodeKey(req_data.keys[0]);
     auto& stored = store_[key];
 
-    // there used several WaitToRead, this is because \a recved's memory
-    // could be deallocated when this function returns. so we need to make sure
-    // the operators with \a NDArray are actually finished
     if (req_meta.push) {
       size_t ds[] = {(size_t)req_data.lens[0]};
       TShape dshape(ds, ds + 1);
@@ -484,7 +491,7 @@ class KVStoreDistServer {
         stored = NDArray(dshape, Context());
         CopyFromTo(recved, &stored, 0);
         server->Response(req_meta);
-        stored.WaitToRead();
+//        stored.WaitToRead();
       } else if (sync_mode_) {
         // synced push
         auto& merged = merge_buf_[key];
@@ -505,7 +512,7 @@ class KVStoreDistServer {
             updater_(key, recved, &stored);
           });
         server->Response(req_meta);
-        stored.WaitToRead();
+//        stored.WaitToRead();
       }
     } else {
       DefaultStorageResponse(key, stored, req_meta, req_data, server);

@@ -75,11 +75,21 @@ class KVStoreServer(object):
 def _init_kvstore_server_module():
     """Start server/scheduler."""
     is_worker = ctypes.c_int()
+    is_scheduler = ctypes.c_int()
     check_call(_LIB.MXKVStoreIsWorkerNode(ctypes.byref(is_worker)))
+    check_call(_LIB.MXKVStoreIsSchedulerNode(ctypes.byref(is_scheduler)))
     if is_worker.value == 0:
         kvstore = create('dist')
+        if is_scheduler.value == 0:
+            import random
+            from .profiler import profiler_set_state, dump_profile, profiler_set_config
+            profiler_set_config(mode='all', filename="server"+str(random.random())+".json")
+            profiler_set_state('run')
         server = KVStoreServer(kvstore)
         server.run()
+        if is_scheduler.value == 0:
+            profiler_set_state('stop')
+            dump_profile()
         sys.exit()
 
 _init_kvstore_server_module()

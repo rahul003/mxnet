@@ -145,6 +145,8 @@ void Profiler::EmitEvent(std::ostream *os, const std::string& name,
 
 
 void Profiler::DumpProfile() {
+  if (!enable_output_) return;
+
   SetState(kNotRunning);
 
   std::lock_guard<std::mutex> lock{this->m_};
