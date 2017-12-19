@@ -46,7 +46,9 @@ if __name__ == '__main__':
         # train
         num_epochs       = 5,
         lr_step_epochs   = '30,60',
-        dtype            = 'float32'
+        dtype            = 'float32',
+        gc_type 	 = '2bit',
+        kv_store 	 = 'dist_sync_device'
     )
     args = parser.parse_args()
 
@@ -57,6 +59,8 @@ if __name__ == '__main__':
     mx.kvstore_server._init_kvstore_server_module(args.proffile)
     mx.profiler.profiler_set_config(mode='all',filename="/home/ubuntu/"+args.proffile+"_worker.json")
     mx.profiler.profiler_set_state('run')
+    import time
+    time.sleep(5)
     # train
     fit.fit(args, sym, data.get_rec_iter)
     mx.profiler.profiler_set_state('stop')

@@ -173,7 +173,9 @@ class KVStoreDistServer {
   void DataHandleEx(const std::shared_ptr<ps::KVMeta> req_meta,
                     const std::shared_ptr<ps::KVPairs<real_t> > req_data,
                     ps::KVServer<real_t>* server) {
+    std::cout<<"worked till here"<<std::endl;
     DataHandleType recved_type = static_cast<DataHandleType>(req_meta->cmd);
+    std::cout<<"not here"<<std::endl;
     if (recved_type == DataHandleType::kRowSparsePushPull) {
       DataHandleRowSparse(*req_meta, *req_data, server);
     } else if (recved_type == DataHandleType::kCompressedPushPull) {
@@ -188,7 +190,7 @@ class KVStoreDistServer {
                            ps::KVServer<real_t>* server) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
       mxnet::Engine::Get()->PushSync([key, merged, server, this, stored](mxnet::RunContext ctx) {
-//        std::cout<<"started applyupdates for key "<<key<<std::endl;
+        std::cout<<"started applyupdates for key "<<key<<std::endl;
          // let the main thread to execute updater_, which is necessary for python
          if (updater_) {
 //           exec_.Exec([this, key, merged, stored](){
@@ -197,7 +199,7 @@ class KVStoreDistServer {
 //           });
          } else {
            // if no updater, just copy
-           CopyFromTo(merged->array, stored);
+//           CopyFromTo(merged->array, stored);
          }
          if (log_verbose_)  {
            LOG(INFO) << "sync response to " << merged->request.size() << " workers";
@@ -205,8 +207,9 @@ class KVStoreDistServer {
          for (const auto& req : merged->request) {
            server->Response(req);
          }
+        std::cout<<"response sent"<<std::endl;
          merged->request.clear();
-//          std::cout<<"ended applyupdates for key "<<key<<std::endl;
+          std::cout<<"ended applyupdates for key "<<key<<std::endl;
        }, stored->ctx(), {stored->var()}, {},
        mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("ApplyUpdates"));
 
@@ -468,7 +471,7 @@ class KVStoreDistServer {
   void DataHandleDefault(const ps::KVMeta& req_meta,
                          const ps::KVPairs<real_t> &req_data,
                          ps::KVServer<real_t>* server) {
-//    std::cout<<"push received here"<<std::endl;
+    std::cout<<"push received here"<<std::endl;
     CHECK_EQ(req_meta.cmd, static_cast<int>(DataHandleType::kDefaultPushPull));
     // do some check
     CHECK_EQ(req_data.keys.size(), (size_t)1);
