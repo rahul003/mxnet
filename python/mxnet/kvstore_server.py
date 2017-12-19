@@ -72,18 +72,20 @@ class KVStoreServer(object):
         _ctrl_proto = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)
         check_call(_LIB.MXKVStoreRunServer(self.handle, _ctrl_proto(self._controller()), None))
 
-def _init_kvstore_server_module():
+def _init_kvstore_server_module(proffile="prof"):
     """Start server/scheduler."""
+    is_scheduler = ctypes.c_int()
     is_worker = ctypes.c_int()
     is_scheduler = ctypes.c_int()
     check_call(_LIB.MXKVStoreIsWorkerNode(ctypes.byref(is_worker)))
     check_call(_LIB.MXKVStoreIsSchedulerNode(ctypes.byref(is_scheduler)))
     if is_worker.value == 0:
+        from.profiler import profiler_set_state,dump_profile,profiler_set_config
         kvstore = create('dist')
         if is_scheduler.value == 0:
             import random
             from .profiler import profiler_set_state, dump_profile, profiler_set_config
-            profiler_set_config(mode='all', filename="server"+str(random.random())+".json")
+            profiler_set_config(mode='all', filename="/home/ubuntu/"+proffile+"_server.json")
             profiler_set_state('run')
         server = KVStoreServer(kvstore)
         server.run()
@@ -92,4 +94,4 @@ def _init_kvstore_server_module():
             dump_profile()
         sys.exit()
 
-_init_kvstore_server_module()
+#_init_kvstore_server_module()
