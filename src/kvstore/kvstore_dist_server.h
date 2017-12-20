@@ -147,7 +147,8 @@ class KVStoreDistServer {
 
  private:
   struct MergeBuf {
-    std::vector<ps::KVMeta> request;
+    std::vector<std::shared_ptr<ps::KVMeta>> request;
+    std::vector<std::shared_ptr<ps::KVPairs> > data;
     NDArray array;
   };
 
@@ -181,7 +182,7 @@ class KVStoreDistServer {
     } else if (recved_type == DataHandleType::kCompressedPushPull) {
       DataHandleCompressed(*req_meta, *req_data, server);
     } else {
-      DataHandleDefault(*req_meta, *req_data, server);
+      DataHandleDefault(req_meta, req_data, server);
     }
     return;
   }
@@ -199,7 +200,7 @@ class KVStoreDistServer {
 //           });
          } else {
            // if no updater, just copy
-//           CopyFromTo(merged->array, stored);
+           CopyFromTo(merged->array, stored);
          }
          if (log_verbose_)  {
            LOG(INFO) << "sync response to " << merged->request.size() << " workers";
@@ -468,32 +469,32 @@ class KVStoreDistServer {
     }
   }
 
-  void DataHandleDefault(const ps::KVMeta& req_meta,
-                         const ps::KVPairs<real_t> &req_data,
+  void DataHandleDefault(const std::shared_ptr<ps::KVMeta> req_meta,
+                         const std::shared_ptr<ps::KVPairs<real_t> > req_data,
                          ps::KVServer<real_t>* server) {
     std::cout<<"push received here"<<std::endl;
-    CHECK_EQ(req_meta.cmd, static_cast<int>(DataHandleType::kDefaultPushPull));
+    CHECK_EQ(req_meta->cmd, static_cast<int>(DataHandleType::kDefaultPushPull));
     // do some check
-    CHECK_EQ(req_data.keys.size(), (size_t)1);
-    if (req_meta.push) {
-      CHECK_EQ(req_data.lens.size(), (size_t)1);
-      CHECK_EQ(req_data.vals.size(), (size_t)req_data.lens[0]);
+    CHECK_EQ(req_data->keys.size(), (size_t)1);
+    if (req_meta->push) {
+      CHECK_EQ(req_data->lens.size(), (size_t)1);
+      CHECK_EQ(req_data->vals.size(), (size_t)req_data->lens[0]);
     }
 
-    int key = DecodeKey(req_data.keys[0]);
+    int key = DecodeKey(req_data->keys[0]);
     auto& stored = store_[key];
 
-    if (req_meta.push) {
-      size_t ds[] = {(size_t)req_data.lens[0]};
+    if (req_meta->push) {
+      size_t ds[] = {(size_t)req_data->lens[0]};
       TShape dshape(ds, ds + 1);
-      TBlob recv_blob((real_t*)req_data.vals.data(), // NOLINT(*)
+      TBlob recv_blob((real_t*)req_data->vals.data(), // NOLINT(*)
                       dshape, cpu::kDevMask);
       NDArray recved = NDArray(recv_blob, 0);
       if (stored.is_none()) {
         // initialization
         stored = NDArray(dshape, Context());
         CopyFromTo(recved, &stored, 0);
-        server->Response(req_meta);
+        server->Response(*req_meta);
 //        stored.WaitToRead();
       } else if (sync_mode_) {
         // synced push
@@ -507,6 +508,7 @@ class KVStoreDistServer {
           merged.array += recved;
         }
         merged.request.push_back(req_meta);
+        merged.data.push_back(req_data);
         ApplyUpdates(key, &merged, &stored, server);
       } else {
         // async push
@@ -514,11 +516,11 @@ class KVStoreDistServer {
             CHECK(updater_);
             updater_(key, recved, &stored);
           });
-        server->Response(req_meta);
+        server->Response(*req_meta);
 //        stored.WaitToRead();
       }
     } else {
-      DefaultStorageResponse(key, stored, req_meta, req_data, server);
+      DefaultStorageResponse(key, stored, *req_meta, *req_data, server);
     }
   }
 
