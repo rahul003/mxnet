@@ -190,7 +190,7 @@ class KVStoreDistServer {
                            ps::KVServer<real_t>* server) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
       mxnet::Engine::Get()->PushSync([key, merged, server, this, stored](mxnet::RunContext ctx) {
-        if(log_verbose_) LOG(INFO) << "Applying updates for key: "<< key;
+        if(log_verbose_) LOG(INFO) << ps::MyRank() << ": Applying updates for key: "<< key;
 
                                        // let the main thread to execute updater_, which is necessary for python
          if (updater_) {
@@ -208,13 +208,13 @@ class KVStoreDistServer {
            server->Response(req);
          }
          if (log_verbose_)  {
-           LOG(INFO) << "sync response to " << merged->request.size() << " workers for key: "<<key;
+           LOG(INFO) << ps::MyRank() << ": sync response to " << merged->request.size() << " workers for key: "<<key;
          }
       stored->WaitToRead();
       merged->request.clear();
       merged->msg.clear();
       if (log_verbose_)  {
-        LOG(INFO) << "Clearing merged for " << key;
+        LOG(INFO) << ps::MyRank() << ": Clearing merged for " << key;
       }
       }, stored->ctx(), {stored->var()}, {},
       mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("ApplyUpdates"));
@@ -394,7 +394,7 @@ class KVStoreDistServer {
                               const ps::KVPairs<real_t> &req_data,
                               ps::KVServer<real_t>* server) {
     mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server, this](mxnet::RunContext ctx) {
-        if(this->log_verbose_) LOG(INFO) << "Engine processing pull for key: "<< key;
+        if(this->log_verbose_) LOG(INFO) << ps::MyRank() << "Engine processing pull for key: "<< key;
         ps::KVPairs<real_t> response;
        CHECK(!stored.is_none()) << "init " << key << " first";
        auto len = stored.shape().Size();
@@ -405,7 +405,7 @@ class KVStoreDistServer {
        server->Response(req_meta, response);
      }, stored.ctx(), {stored.var()}, {},
      mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("DefaultStorageResponse"));
-    if(log_verbose_) LOG(INFO) << "Pushed to engine pull for key: "<< key;
+    if(log_verbose_) LOG(INFO) << ps::MyRank() << ": Pushed to engine pull for key: "<< key;
   }
 
   void DataHandleCompressed(const ps::KVMeta& req_meta,
@@ -500,7 +500,7 @@ class KVStoreDistServer {
     auto& stored = store_[key];
 
     if (req_meta.push) {
-      if(log_verbose_) LOG(INFO) << "Push recvd for key: "<< key;
+      if(log_verbose_) LOG(INFO) << ps::MyRank() << ": Push recvd for key: "<< key;
       size_t ds[] = {(size_t)req_data.lens[0]};
       TShape dshape(ds, ds + 1);
       TBlob recv_blob((real_t*)req_data.vals.data(), // NOLINT(*)
