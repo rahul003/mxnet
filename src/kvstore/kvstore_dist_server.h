@@ -394,8 +394,8 @@ class KVStoreDistServer {
                               const ps::KVMeta& req_meta,
                               const ps::KVPairs<real_t> &req_data,
                               ps::KVServer<real_t>* server) {
-    mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server, log_verbose_](mxnet::RunContext ctx) {
-        if(log_verbose_) LOG(INFO) << "Engine processing pull for key: "<< key;
+    mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server, this](mxnet::RunContext ctx) {
+        if(this->log_verbose_) LOG(INFO) << "Engine processing pull for key: "<< key;
         ps::KVPairs<real_t> response;
        CHECK(!stored.is_none()) << "init " << key << " first";
        auto len = stored.shape().Size();
