@@ -405,7 +405,7 @@ class KVStoreDistServer {
        server->Response(req_meta, response);
      }, stored.ctx(), {stored.var()}, {},
      mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("DefaultStorageResponse"));
-    if(log_verbose_) LOG(INFO) << "Data handle request received and pushed to engine for pull of key: "<< key;
+    if(log_verbose_) LOG(INFO) << "Pushed to engine pull for key: "<< key;
   }
 
   void DataHandleCompressed(const ps::KVMeta& req_meta,
@@ -500,7 +500,7 @@ class KVStoreDistServer {
     auto& stored = store_[key];
 
     if (req_meta.push) {
-      if(log_verbose_) LOG(INFO) << "Data handle request received for push of key: "<< key;
+      if(log_verbose_) LOG(INFO) << "Push recvd for key: "<< key;
       size_t ds[] = {(size_t)req_data.lens[0]};
       TShape dshape(ds, ds + 1);
       TBlob recv_blob((real_t*)req_data.vals.data(), // NOLINT(*)
