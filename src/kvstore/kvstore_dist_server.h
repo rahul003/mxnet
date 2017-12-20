@@ -175,7 +175,6 @@ class KVStoreDistServer {
                     const ps::KVMeta req_meta,
                     const ps::KVPairs<real_t> req_data,
                     ps::KVServer<real_t>* server) {
-    std::cout<<"worked till here"<<std::endl;
     DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
     if (recved_type == DataHandleType::kRowSparsePushPull) {
       DataHandleRowSparse(req_meta, req_data, server);
