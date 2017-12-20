@@ -118,7 +118,7 @@ class KVStoreDistServer {
     static_cast<ps::SimpleApp*>(ps_server_)->set_request_handle(
         std::bind(&KVStoreDistServer::CommandHandle, this, _1, _2));
     ps_server_->set_request_handle(
-        std::bind(&KVStoreDistServer::DataHandleEx, this, _1, _2, _3));
+        std::bind(&KVStoreDistServer::DataHandleEx, this, _1, _2, _3, _4));
     sync_mode_ = false;
     gradient_compression_ = std::make_shared<GradientCompression>();
     log_verbose_ = dmlc::GetEnv("MXNET_KVSTORE_DIST_ROW_SPARSE_VERBOSE", false);
@@ -147,8 +147,8 @@ class KVStoreDistServer {
 
  private:
   struct MergeBuf {
-    std::vector<std::shared_ptr<ps::KVMeta>> request;
-    std::vector<std::shared_ptr<ps::KVPairs> > data;
+    std::vector<std::shared_ptr<ps::Message> > msg;
+    std::vector<ps::KVMeta> request;
     NDArray array;
   };
 
@@ -171,18 +171,18 @@ class KVStoreDistServer {
     app->Response(recved);
   }
 
-  void DataHandleEx(const std::shared_ptr<ps::KVMeta> req_meta,
-                    const std::shared_ptr<ps::KVPairs<real_t> > req_data,
+  void DataHandleEx(const std::shared_ptr<ps::Message> msg,
+                    const ps::KVMeta req_meta,
+                    const ps::KVPairs<real_t> req_data,
                     ps::KVServer<real_t>* server) {
     std::cout<<"worked till here"<<std::endl;
-    DataHandleType recved_type = static_cast<DataHandleType>(req_meta->cmd);
-    std::cout<<"not here"<<std::endl;
+    DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
     if (recved_type == DataHandleType::kRowSparsePushPull) {
-      DataHandleRowSparse(*req_meta, *req_data, server);
+      DataHandleRowSparse(req_meta, req_data, server);
     } else if (recved_type == DataHandleType::kCompressedPushPull) {
-      DataHandleCompressed(*req_meta, *req_data, server);
+      DataHandleCompressed(req_meta, req_data, server);
     } else {
-      DataHandleDefault(req_meta, req_data, server);
+      DataHandleDefault(msg, req_meta, req_data, server);
     }
     return;
   }
@@ -191,7 +191,7 @@ class KVStoreDistServer {
                            ps::KVServer<real_t>* server) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
       mxnet::Engine::Get()->PushSync([key, merged, server, this, stored](mxnet::RunContext ctx) {
-        std::cout<<"started applyupdates for key "<<key<<std::endl;
+         std::cout<<"started applyupdates for key "<<key<<std::endl;
          // let the main thread to execute updater_, which is necessary for python
          if (updater_) {
 //           exec_.Exec([this, key, merged, stored](){
@@ -208,12 +208,12 @@ class KVStoreDistServer {
          for (const auto& req : merged->request) {
            server->Response(req);
          }
-        std::cout<<"response sent"<<std::endl;
-         merged->request.clear();
-          std::cout<<"ended applyupdates for key "<<key<<std::endl;
-       }, stored->ctx(), {stored->var()}, {},
-       mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("ApplyUpdates"));
 
+          std::cout<<"response sent"<<std::endl;
+      merged->request.clear();
+      merged->msg.clear();
+      }, stored->ctx(), {stored->var()}, {},
+      mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("ApplyUpdates"));
 //      stored->WaitToRead();
     } else {
 //      merged->array.WaitToRead();
@@ -469,33 +469,41 @@ class KVStoreDistServer {
     }
   }
 
-  void DataHandleDefault(const std::shared_ptr<ps::KVMeta> req_meta,
-                         const std::shared_ptr<ps::KVPairs<real_t> > req_data,
+  void FreeMessage(const NDArray& stored, const std::shared_ptr<ps::Message> msg, const ps::KVMeta& req_meta,
+                   ps::KVServer<real_t>* server) {
+    mxnet::Engine::Get()->PushSync([stored, msg, req_meta, server](mxnet::RunContext ctx) {
+       server->Response(req_meta);
+      }, stored.ctx(), {stored.var()}, {},
+      mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("FreeMessage"));
+  }
+
+  void DataHandleDefault(const std::shared_ptr<ps::Message> msg,
+                         const ps::KVMeta& req_meta,
+                         const ps::KVPairs<real_t>& req_data,
                          ps::KVServer<real_t>* server) {
     std::cout<<"push received here"<<std::endl;
-    CHECK_EQ(req_meta->cmd, static_cast<int>(DataHandleType::kDefaultPushPull));
+    CHECK_EQ(req_meta.cmd, static_cast<int>(DataHandleType::kDefaultPushPull));
     // do some check
-    CHECK_EQ(req_data->keys.size(), (size_t)1);
-    if (req_meta->push) {
-      CHECK_EQ(req_data->lens.size(), (size_t)1);
-      CHECK_EQ(req_data->vals.size(), (size_t)req_data->lens[0]);
+    CHECK_EQ(req_data.keys.size(), (size_t)1);
+    if (req_meta.push) {
+      CHECK_EQ(req_data.lens.size(), (size_t)1);
+      CHECK_EQ(req_data.vals.size(), (size_t)req_data.lens[0]);
     }
 
-    int key = DecodeKey(req_data->keys[0]);
+    int key = DecodeKey(req_data.keys[0]);
     auto& stored = store_[key];
 
-    if (req_meta->push) {
-      size_t ds[] = {(size_t)req_data->lens[0]};
+    if (req_meta.push) {
+      size_t ds[] = {(size_t)req_data.lens[0]};
       TShape dshape(ds, ds + 1);
-      TBlob recv_blob((real_t*)req_data->vals.data(), // NOLINT(*)
+      TBlob recv_blob((real_t*)req_data.vals.data(), // NOLINT(*)
                       dshape, cpu::kDevMask);
       NDArray recved = NDArray(recv_blob, 0);
       if (stored.is_none()) {
         // initialization
         stored = NDArray(dshape, Context());
         CopyFromTo(recved, &stored, 0);
-        server->Response(*req_meta);
-//        stored.WaitToRead();
+        FreeMessage(stored, msg, req_meta, server);
       } else if (sync_mode_) {
         // synced push
         auto& merged = merge_buf_[key];
@@ -508,7 +516,7 @@ class KVStoreDistServer {
           merged.array += recved;
         }
         merged.request.push_back(req_meta);
-        merged.data.push_back(req_data);
+        merged.msg.push_back(msg);
         ApplyUpdates(key, &merged, &stored, server);
       } else {
         // async push
@@ -516,11 +524,11 @@ class KVStoreDistServer {
             CHECK(updater_);
             updater_(key, recved, &stored);
           });
-        server->Response(*req_meta);
+        server->Response(req_meta);
 //        stored.WaitToRead();
       }
     } else {
-      DefaultStorageResponse(key, stored, *req_meta, *req_data, server);
+      DefaultStorageResponse(key, stored, req_meta, req_data, server);
     }
   }
 
