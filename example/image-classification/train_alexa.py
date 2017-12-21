@@ -38,16 +38,18 @@ if __name__ == '__main__':
         network          = 'alexa',
         # data
         benchmark        = 1,
-        num_classes      = 1000,
+        num_classes      = 3100,
+        batch_size       = 1024,
+        gpus = '0,1,2,3,4,5,6,7',
         num_examples     = 100000,
-        image_shape      = '3,224,224',
+        image_shape      = '3,11,10',
         min_random_scale = 1, # if input image has min size k, suggest to use
                               # 256.0/x, e.g. 0.533 for 480
         # train
-        num_epochs       = 5,
+        num_epochs       = 1,
         lr_step_epochs   = '30,60',
         dtype            = 'float32',
-        gc_type 	 = '2bit',
+        gc_type 	 = 'none',
         kv_store 	 = 'dist_sync_device'
     )
     args = parser.parse_args()
