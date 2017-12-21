@@ -395,7 +395,8 @@ class KVStoreDistServer {
                               const ps::KVPairs<real_t> &req_data,
                               ps::KVServer<real_t>* server) {
     mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server, this](mxnet::RunContext ctx) {
-        if(this->log_verbose_) LOG(INFO) << ps::MyRank() << "Engine processing pull for key: "<< key;
+
+        if(this->first_pull_[key] && this->log_verbose_) LOG(INFO) << ps::MyRank() << "Engine processing pull for key: "<< key;
         ps::KVPairs<real_t> response;
        CHECK(!stored.is_none()) << "init " << key << " first";
        auto len = stored.shape().Size();
@@ -404,9 +405,11 @@ class KVStoreDistServer {
        // TODO(mli) try to remove this CopyFrom
        response.vals.CopyFrom(static_cast<const float*>(stored.data().dptr_), len);
        server->Response(req_meta, response);
+
+      if(!first_pull_[key]) first_pull_[key] = true;
      }, stored.ctx(), {stored.var()}, {},
      mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("DefaultStorageResponse"));
-    if(log_verbose_) LOG(INFO) << ps::MyRank() << ": Pushed to engine pull for key: "<< key;
+    if(first_pull_[key] && log_verbose_) LOG(INFO) << ps::MyRank() << ": Pushed to engine pull for key: "<< key;
   }
 
   void DataHandleCompressed(const ps::KVMeta& req_meta,
@@ -570,6 +573,8 @@ class KVStoreDistServer {
 
   // whether to LOG verbose information
   bool log_verbose_;
+
+  std::unordered_map<int, bool> first_pull_;
 
   /**
    * \brief gradient compression object.
