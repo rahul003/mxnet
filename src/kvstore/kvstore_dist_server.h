@@ -118,7 +118,7 @@ class KVStoreDistServer {
     static_cast<ps::SimpleApp*>(ps_server_)->set_request_handle(
         std::bind(&KVStoreDistServer::CommandHandle, this, _1, _2));
     ps_server_->set_request_handle(
-        std::bind(&KVStoreDistServer::DataHandleEx, this, _1, _2, _3, _4));
+      std::bind(&KVStoreDistServer::DataHandleEx, this, _1, _2, _3, _4));
     sync_mode_ = false;
     gradient_compression_ = std::make_shared<GradientCompression>();
     log_verbose_ = dmlc::GetEnv("MXNET_KVSTORE_DIST_ROW_SPARSE_VERBOSE", false);
@@ -150,6 +150,7 @@ class KVStoreDistServer {
     std::vector<std::shared_ptr<ps::Message> > msg;
     std::vector<ps::KVMeta> request;
     NDArray array;
+
   };
 
   void CommandHandle(const ps::SimpleData& recved, ps::SimpleApp* app) {
@@ -475,14 +476,6 @@ class KVStoreDistServer {
     }
   }
 
-  void FreeMessage(const NDArray& stored, const std::shared_ptr<ps::Message> msg, const ps::KVMeta& req_meta,
-                   ps::KVServer<real_t>* server) {
-    mxnet::Engine::Get()->PushSync([stored, msg, req_meta, server](mxnet::RunContext ctx) {
-       server->Response(req_meta);
-      }, stored.ctx(), {stored.var()}, {},
-      mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("FreeMessage"));
-  }
-
   void DataHandleDefault(const std::shared_ptr<ps::Message> msg,
                          const ps::KVMeta& req_meta,
                          const ps::KVPairs<real_t>& req_data,
@@ -500,7 +493,6 @@ class KVStoreDistServer {
     auto& stored = store_[key];
 
     if (req_meta.push) {
-      if(log_verbose_) LOG(INFO) << ps::MyRank() << ": Push recvd for key: "<< key;
       size_t ds[] = {(size_t)req_data.lens[0]};
       TShape dshape(ds, ds + 1);
       TBlob recv_blob((real_t*)req_data.vals.data(), // NOLINT(*)
@@ -510,8 +502,11 @@ class KVStoreDistServer {
         // initialization
         stored = NDArray(dshape, Context());
         CopyFromTo(recved, &stored, 0);
-        FreeMessage(stored, msg, req_meta, server);
+        server->Response(req_meta);
+        stored.WaitToRead();
       } else if (sync_mode_) {
+
+        if(log_verbose_) LOG(INFO) << ps::MyRank() << ": Push recvd for key: "<< key;
         // synced push
         auto& merged = merge_buf_[key];
         if (merged.array.is_none()) {
