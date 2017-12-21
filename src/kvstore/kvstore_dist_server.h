@@ -215,7 +215,7 @@ class KVStoreDistServer {
       }, stored->ctx(), {stored->var()}, {},
       mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("ApplyUpdates"));
 
-      mxnet::Engine::Get()->PushSync([merged, this](mxnet::RunContext ctx) {
+      mxnet::Engine::Get()->PushSync([merged, this, key](mxnet::RunContext ctx) {
         merged->request.clear();
         merged->msg.clear();
        if (this->log_verbose_)  {
