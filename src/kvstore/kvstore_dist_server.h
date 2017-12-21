@@ -190,40 +190,35 @@ class KVStoreDistServer {
   inline void ApplyUpdates(const int key, MergeBuf *merged, NDArray *stored,
                            ps::KVServer<real_t>* server) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
-      mxnet::Engine::Get()->PushSync([key, merged, server, this, stored](mxnet::RunContext ctx) {
-        if(log_verbose_) LOG(INFO) << ps::MyRank() << ": Applying updates for key: "<< key;
+//        if(log_verbose_) LOG(INFO) << ps::MyRank() << ": Applying updates for key: "<< key;
           // let the main thread to execute updater_, which is necessary for python
          if (updater_) {
-           exec_.Exec([this, key, merged, stored](){
+//           exec_.Exec([this, key, merged, stored](){
              CHECK(updater_);
              updater_(key, merged->array, stored);
-           });
+//           });
          } else {
            // if no updater, just copy
-           //TODO fix this
            CopyFromTo(merged->array, stored);
          }
+
          for (const auto& req : merged->request) {
            server->Response(req);
          }
-         if (log_verbose_)  {
-           LOG(INFO) << ps::MyRank() << ": sync response to " << merged->request.size() << " workers for key: "<<key;
-         }
-      if (log_verbose_)  {
-        LOG(INFO) << ps::MyRank() << ": Clearing merged for " << key;
-      }
-      }, stored->ctx(), {stored->var()}, {},
-      mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("ApplyUpdates"));
+//         if (log_verbose_)  {
+//           LOG(INFO) << ps::MyRank() << ": sync response to " << merged->request.size() << " workers for key: "<<key;
+//         }
 
       mxnet::Engine::Get()->PushSync([merged, this, key](mxnet::RunContext ctx) {
         merged->request.clear();
         merged->msg.clear();
-       if (this->log_verbose_)  {
-         LOG(INFO) << ps::MyRank() << ": Cleared merged request and msg for key: "<<key;
-       }
+//       if (this->log_verbose_)  {
+//         LOG(INFO) << ps::MyRank() << ": Cleared merged request and msg for key: "<<key;
+//       }
       }, stored->ctx(), {stored->var()}, {},
-       mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("Clear merged"));
+       mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("ClearMerged"));
 //      stored->WaitToRead();
+
     } else {
 //      merged->array.WaitToRead();
     }
@@ -399,8 +394,7 @@ class KVStoreDistServer {
                               const ps::KVPairs<real_t> &req_data,
                               ps::KVServer<real_t>* server) {
     mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server, this](mxnet::RunContext ctx) {
-
-        if(this->first_pull_done_[key] && this->log_verbose_) LOG(INFO) << ps::MyRank() << "Engine processing pull for key: "<< key;
+//        if(this->first_pull_done_[key] && this->log_verbose_) LOG(INFO) << ps::MyRank() << "Engine processing pull for key: "<< key;
         ps::KVPairs<real_t> response;
        CHECK(!stored.is_none()) << "init " << key << " first";
        auto len = stored.shape().Size();
@@ -410,13 +404,13 @@ class KVStoreDistServer {
        response.vals.CopyFrom(static_cast<const float*>(stored.data().dptr_), len);
        server->Response(req_meta, response);
 
-      if(!first_pull_done_[key]) {
-        first_pull_done_[key] = true;
-        if(this->log_verbose_) LOG(INFO) << ps::MyRank() << "First pull done for key: "<<key;
-      }
+//      if(!first_pull_done_[key]) {
+//        first_pull_done_[key] = true;
+//        if(this->log_verbose_) LOG(INFO) << ps::MyRank() << "First pull done for key: "<<key;
+//      }
      }, stored.ctx(), {stored.var()}, {},
      mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("DefaultStorageResponse"));
-    if(first_pull_done_[key] && log_verbose_) LOG(INFO) << ps::MyRank() << ": Pushed to engine pull for key: "<< key;
+//    if(first_pull_done_[key] && log_verbose_) LOG(INFO) << ps::MyRank() << ": Pushed to engine pull for key: "<< key;
   }
 
   void DataHandleCompressed(const ps::KVMeta& req_meta,
