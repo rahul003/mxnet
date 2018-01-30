@@ -31,12 +31,6 @@
 namespace mxnet {
 namespace kvstore {
 
-// these gpu functions are defined in gradient_compression.cu
-void Quantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
-                      const float threshold);
-void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
-                        const float threshold);
-
 struct quantize_2bit {
   MSHADOW_XINLINE static void Map(int out_block_id,
                                   int original_size,
@@ -149,6 +143,143 @@ inline void Dequantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
                                const float threshold) {
   Dequantize2BitKernelLaunch(s, inputs, threshold);
 }
+
+struct half_dequantize_2bit {
+  MSHADOW_XINLINE static void Map(int i,
+                                  int *out,
+                                  float *in) {
+    // get position of dequantized value to fill
+    int *outval = out + i;
+    // gets byte which holds quantized value for this position
+    char *ch_ptr = reinterpret_cast<char *>(in + (i >> 4));
+    ch_ptr += ((i & 15) >> 2);
+    // masks used to quantize data
+    const uint8_t posbits[] = {0xc0, 0x30, 0x0c, 0x03};
+    const uint8_t negbits[] = {0x80, 0x20, 0x08, 0x02};
+    // col denotes which two bits of a byte are set for this value
+    // col=0 implies first two bits, col=3 implies last two bits,...
+    const int col = i & 3;
+    const uint8_t mask = posbits[col];
+    const uint8_t negmask = negbits[col];
+    const uint8_t masked = *ch_ptr & mask;
+    if (masked == mask) {
+      *outval += 2;
+    } else if (masked == negmask) {
+      // use posbits for mask as posbits are both 1s
+      // then compare masked with negbits to see if only negbits were set
+      *outval += 0;
+    } else {
+      *outval += 1;
+    }
+  }
+};
+
+inline void Dequantize2BitForSumImpl(mshadow::Stream<mshadow::cpu> *s,
+                                     const std::vector<mxnet::TBlob> &inputs) {
+  mxnet::op::mxnet_op::Kernel<half_dequantize_2bit, mshadow::cpu>
+  ::Launch(s,
+           inputs[1].Size(),         // original size
+           inputs[1].dptr<int>(),  // to array
+           inputs[0].dptr<float>()); // from array
+}
+
+
+int gcd(int a, int b) {
+  int t;
+  while (b != 0) {
+    t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+
+int lcm(int a, int b) {
+  return (a*b)/gcd(a, b);
+}
+
+
+struct requantize_2bit {
+  MSHADOW_XINLINE static void Map(int out_block_id,   // id of parallel kernel
+                                  int block_size,     // number of output floats to process by each call
+                                  int original_size,
+                                  int num_workers,
+                                  int num_bits,
+                                  float *out,         // size = num_blocks * block_size
+                                  int *sum) {
+    // this call is responsible for quantizing values into block_size number of 32bit locations
+    // if `b` bits are being used for a single gradient value, then it is guaranteed that
+    // `32*block_size` is divisible by `b`. so the number of values in the original sum array that this call
+    // is responsible for is equal to `32 * block_size / b`
+
+    float *compr_first_float = out + out_block_id;
+    // number of sum values to be processed by this kernel call are
+    // (out_block_id * block_size)/num_bits
+    for (int i=0; i < block_size; i++, compr_first_float++) {
+
+      *compr_first_float = 0;
+
+      // inclusive
+      int st_pos = 0;
+      // including
+      int end_pos = num_bits - 1;
+
+      // this will be incremented thrice to cover the full float
+      char *byte_ptr = reinterpret_cast < char * > (compr_first_float);
+      while (end_pos != block_size*32) {
+        uint8_t s = (uint8_t) *(sum++);
+        if (st_pos/8 == end_pos/8) {
+          // doesn't cross byte boundary
+          *(byte_ptr) |= s << (8 - num_bits);
+        } else {
+          int bits_remaining = 8 - (end_pos%8 + 1);
+          // shift by num_bits - bits_remaining, so that bits_remaining is when the value starts
+          *(byte_ptr++) |= s >> (num_bits - bits_remaining);
+          *(byte_ptr) |= s << (8 - num_bits + bits_remaining);
+        }
+        st_pos += num_bits;
+        end_pos += num_bits;
+
+        if(st_pos % 8 == 0) byte_ptr++;
+      }
+    }
+  }
+};
+
+
+inline void Requantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
+                               const std::vector<mxnet::TBlob> &inputs,
+                               const int num_workers,
+                               const int original_size) {
+
+  int block_size = lcm(num_workers, 32) / 32;
+
+  // number of bits used for each value
+  int num_bits = (int) ceil(log2(2 * num_workers + 1));
+
+  if (num_bits > 8) {
+    LOG(FATAL) << "Gradient compression unsupported for this type and number of workers right now";
+  }
+
+  mxnet::op::mxnet_op::Kernel<requantize_2bit, mshadow::cpu>
+  ::Launch(s,
+           (inputs[1].Size())/block_size,   // number of parallel kernels, one for each block
+           block_size,               // number of output floats (32bits) to process for each kernel call
+           original_size,            // original size
+           num_workers,              // num_workers
+           num_bits,                 // num_bits
+           inputs[1].dptr<float>(),  // compressed array
+           inputs[0].dptr<int>());   // sum array
+}
+
+// these gpu functions are defined in gradient_compression.cu
+void Quantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
+                      const float threshold);
+void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
+                        const float threshold);
+
+
+
 }  // namespace kvstore
 }  // namespace mxnet
 

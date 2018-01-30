@@ -32,6 +32,8 @@
 #include "mxnet/engine.h"
 #include "ps/ps.h"
 #include "./kvstore_dist_server.h"
+#include "kvstore_dist_server.h"
+
 #if MKL_EXPERIMENTAL == 1
 #include <mkl_memory.h>
 #include "../operator/mkl/mkl_memory-inl.h"
@@ -40,7 +42,7 @@
 namespace mxnet {
 namespace kvstore {
 
-/**
+  /**
  * \brief distributed kvstore
  *
  * it's the server node's job to control the data consistency among all
@@ -133,6 +135,9 @@ class KVStoreDist : public KVStoreLocal {
         ps::kWorkerGroup + ps::kServerGroup + ps::kScheduler);
     }
     if (server_) server_->Run();
+    else exec_.Start();
+    // if there's a server started then worker should run this to receive compressed gradients
+
     ps::Finalize();
     if (server_) {
       delete server_;
@@ -251,7 +256,23 @@ class KVStoreDist : public KVStoreLocal {
           priority,
           PROFILER_MESSAGE("KVStoreDistDefaultStoragePull"));
 
-      comm_->Broadcast(key, recv_buf, grouped_vals[i], priority);
+      NDArray stored = store_[key];
+      NDArray recvd = decomp_buf_[key];
+      if (gradient_compression_->get_type() != CompressionType::kNone) {
+        gradient_compression_->Dequantize(recv_buf, &recvd, priority);
+      } else {
+        recvd = recv_buf;
+      }
+      if (updater_) {
+        exec_.Exec([this, key, recvd, &stored](){
+          CHECK(updater_);
+          updater_(key, recvd, &stored);
+        });
+      } else {
+        //todo check async logic
+        stored = recvd;
+      }
+      comm_->Broadcast(key, stored, grouped_vals[i], priority);
     }
   }
 
@@ -312,7 +333,8 @@ class KVStoreDist : public KVStoreLocal {
       // merge over devices
       int key = uniq_keys[i];
       const auto& vals = grouped_vals[i];
-      NDArray merged = do_merge ? comm_->Reduce(key, vals, priority) : vals[0];
+      NDArray merged = store_[key];
+      merged = do_merge ? comm_->Reduce(key, vals, priority) : vals[0];
 
       const auto storage_type = merged.storage_type();
       auto &comm_buf = comm_buf_[key];
@@ -705,6 +727,7 @@ class KVStoreDist : public KVStoreLocal {
     }
     return pskv;
   }
+  Executor exec_;
 
   /**
    * \brief for worker to push and pull data
@@ -719,6 +742,10 @@ class KVStoreDist : public KVStoreLocal {
    */
   size_t bigarray_bound_;
   /**
+   * \brief store_ contains the value at kvstore for each key
+   */
+  std::unordered_map<int, NDArray> store_;
+  /**
    * \brief buffer for non-compressed data.
    * When gradient compression is active, this is used
    * for the data in pull and for original data in push
@@ -730,6 +757,8 @@ class KVStoreDist : public KVStoreLocal {
    * is push
    */
   std::unordered_map<int, NDArray> compr_buf_;
+  std::unordered_map<int, NDArray> decomp_buf_;
+
   /**
    * \brief residual buffer to accumulate quantization error
    * during gradient compression

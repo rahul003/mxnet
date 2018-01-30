@@ -36,5 +36,6 @@ void Dequantize2BitImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& input
                         const float threshold) {
   Dequantize2BitKernelLaunch(s, inputs, threshold);
 }
+
 }  // namespace kvstore
 }  // namespace mxnet

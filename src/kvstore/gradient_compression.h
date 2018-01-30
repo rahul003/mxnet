@@ -100,6 +100,12 @@ class GradientCompression {
   int64_t GetCompressedSize(const int64_t original_size);
 
   /*!
+   * returns recompressed size after merging partially dequantized gradients from each worker
+   * @param num_workers
+   */
+  int64_t GetRecompressedSize(const int num_workers, const int64_t original_size);
+
+  /*!
   * \brief Issues quantize operation to be scheduled by the engine
   * Compresses `from` into `to` and accumulates the quantization error
   * into 'residual', using the quantization of type `type_`
@@ -119,8 +125,11 @@ class GradientCompression {
   * \param priority Priority of the action.
   */
   void Dequantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
+  void DequantizeForSum(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
+  void Requantize(const int num_workers, const int original_size,
+                  const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
 
- private:
+private:
   /*!
    * \brief denotes the type of gradient compression which has been set
    */

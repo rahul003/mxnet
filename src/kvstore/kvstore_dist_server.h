@@ -36,6 +36,7 @@
 #include "mxnet/kvstore.h"
 #include "../operator/tensor/elemwise_binary_op-inl.h"
 #include "../operator/tensor/init_op.h"
+#include "kvstore_dist.h"
 
 namespace mxnet {
 namespace kvstore {
@@ -46,68 +47,6 @@ enum class CommandType {
 
 enum class DataHandleType {
   kDefaultPushPull, kCompressedPushPull, kRowSparsePushPull
-};
-
-/**
- * \brief executor runs a function using the thread called \ref Start
- */
-class Executor {
- public:
-  /**
-   * \brief start the executor
-   */
-  void Start() {
-    std::unique_lock<std::mutex> lk(mu_);
-    while (true) {
-      cond_.wait(lk, [this]{return !queue_.empty();});
-      Block blk = std::move(queue_.front());
-      queue_.pop();
-      lk.unlock();
-
-      if (blk.f) {
-        blk.f(); blk.p->set_value();
-      } else {
-        blk.p->set_value(); break;
-      }
-      lk.lock();
-    }
-  }
-
-  /**
-   * \brief function
-   */
-  typedef std::function<void()> Func;
-
-  /**
-   * \brief let the thread called \ref Start to exec a function. threadsafe
-   */
-  void Exec(const Func& func) {
-    Block blk(func);
-    auto fut = blk.p->get_future();
-    {
-      std::lock_guard<std::mutex> lk(mu_);
-      queue_.push(std::move(blk));
-      cond_.notify_one();
-    }
-    fut.wait();
-  }
-
-  /**
-   * \brief stop the thread, threadsafe
-   */
-  void Stop() {
-    Exec(Func());
-  }
-
- private:
-  struct Block {
-  explicit Block(const Func& func) : f(func), p(std::make_shared<std::promise<void>>()) { }
-    Func f;
-    std::shared_ptr<std::promise<void>> p;
-  };
-  std::queue<Block> queue_;
-  std::mutex mu_;
-  std::condition_variable cond_;
 };
 
 class KVStoreDistServer {
@@ -149,6 +88,9 @@ class KVStoreDistServer {
   struct MergeBuf {
     std::vector<ps::KVMeta> request;
     NDArray array;
+
+    // used for gradient compression to merge quantized array
+    NDArray requantized;
   };
 
   void CommandHandle(const ps::SimpleData& recved, ps::SimpleApp* app) {
@@ -183,16 +125,15 @@ class KVStoreDistServer {
     }
     return;
   }
-
   inline void ApplyUpdates(const int key, MergeBuf *merged, NDArray *stored,
                            ps::KVServer<real_t>* server) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
       // let the main thread to execute updater_, which is necessary for python
       if (updater_) {
         exec_.Exec([this, key, merged, stored](){
-            CHECK(updater_);
-            updater_(key, merged->array, stored);
-          });
+          CHECK(updater_);
+          updater_(key, merged->array, stored);
+        });
       } else {
         // if no updater, just copy
         CopyFromTo(merged->array, stored);
@@ -208,6 +149,32 @@ class KVStoreDistServer {
     } else {
       merged->array.WaitToRead();
     }
+  }
+
+  inline void ApplyUpdates2(const int key, MergeBuf *merged, ps::KVServer<real_t>* server, int original_size) {
+    if (merged->request.size() == (size_t) ps::NumWorkers()) {
+      gradient_compression_->Requantize(ps::NumWorkers(), original_size, merged->array, &(merged->requantized), 0);
+      // let the main thread to execute updater_, which is necessary for python
+//      if (updater_) {
+//        TODO check if this is needed. updater might be pushing to engine and dependency would be managed
+//        merged->array.WaitToRead();
+//        exec_.Exec([this, key, merged, stored](){
+//            CHECK(updater_);
+//            updater_(key, merged->array, stored);
+//          });
+//      } else {
+//         if no updater, just copy
+//        CopyFromTo(merged->array, stored);
+//      }
+//      if (log_verbose_)  {
+//        LOG(INFO) << "sync response to " << merged->request.size() << " workers";
+//      }
+      for (const auto &req : merged->request) {
+        server->Response(req);
+      }
+      merged->request.clear();
+    }
+    merged->requantized.WaitToRead();
   }
 
   void DecodeRowIds(const ps::SArray<ps::Key> &keys, int64_t *indices,
@@ -404,7 +371,7 @@ class KVStoreDistServer {
 
       int original_size = DecodeKey(req_data.keys[0]);
       int key = DecodeKey(req_data.keys[1]);
-      auto& stored = store_[key];
+//      auto& stored = store_[key];
 
       size_t ds[] = {(size_t)req_data.lens[1]};
       TShape dshape(ds, ds + 1);
@@ -412,47 +379,49 @@ class KVStoreDistServer {
                       dshape, cpu::kDevMask);
       NDArray recved = NDArray(recv_blob, 0);
 
-      NDArray decomp_buf = decomp_buf_[key];
+//      NDArray decomp_buf = decomp_buf_[key];
       dshape = TShape{(int64_t) original_size};
 
-      if (decomp_buf.is_none()) {
-        decomp_buf = NDArray(dshape, Context());
-      }
-
-      if (stored.is_none()) {
-        stored = NDArray(dshape, Context());
-        gradient_compression_->Dequantize(recved, &stored, 0);
-        server->Response(req_meta);
-        stored.WaitToRead();
-      } else if (sync_mode_) {
+//      if (decomp_buf.is_none()) {
+//        decomp_buf = NDArray(dshape, Context());
+//      }
+//      if (stored.is_none()) {
+//        stored = NDArray(dshape, Context());
+//        stored = 0;
+//        gradient_compression_->Dequantize(recved, &stored, 0);
+//        server->Response(req_meta);
+//        stored.WaitToRead();
+//      } else
+      if (sync_mode_) {
         // synced push
         auto& merged = merge_buf_[key];
         if (merged.array.is_none()) {
           merged.array = NDArray(dshape, Context());
+          merged.array = 0;
+          TShape requant_shape = TShape{gradient_compression_->
+                                        GetRecompressedSize(ps::NumWorkers(), (int64_t) original_size)};
+          merged.requantized = NDArray(requant_shape, Context(), false, mshadow::kInt32);
         }
-        if (merged.request.size() == 0) {
-          gradient_compression_->Dequantize(recved, &merged.array, 0);
-        } else {
-          gradient_compression_->Dequantize(recved, &decomp_buf, 0);
-          merged.array += decomp_buf;
-        }
+        gradient_compression_->DequantizeForSum(recved, &merged.array, 0);
         merged.request.push_back(req_meta);
-        ApplyUpdates(key, &merged, &stored, server);
+        ApplyUpdates2(key, &merged, server, original_size);
       } else {
         // async push
-        gradient_compression_->Dequantize(recved, &decomp_buf, 0);
-        exec_.Exec([this, key, &decomp_buf, &stored]() {
-          CHECK(updater_);
-          updater_(key, decomp_buf, &stored);
-        });
-        server->Response(req_meta);
-        stored.WaitToRead();
+        //TODO
+        LOG(FATAL) << "not fixed yet";
+//        gradient_compression_->Dequantize(recved, &decomp_buf, 0);
+//        exec_.Exec([this, key, &decomp_buf, &stored]() {
+//          CHECK(updater_);
+//          updater_(key, decomp_buf, &stored);
+//        });
+//        server->Response(req_meta);
+//        stored.WaitToRead();
       }
     } else {       // pull
       CHECK_EQ(req_data.keys.size(), (size_t)1);
       CHECK_EQ(req_data.lens.size(), (size_t)0);
       int key = DecodeKey(req_data.keys[0]);
-      DefaultStorageResponse(key, store_[key], req_meta, req_data, server);
+      DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server);
     }
   }
 
@@ -541,7 +510,6 @@ class KVStoreDistServer {
    * \brief decomp_buf_ is a buffer into which compressed values are
    * decompressed before merging to the store. used when compress_!='none'
    */
-  std::unordered_map<int, NDArray> decomp_buf_;
 
   Executor exec_;
   ps::KVServer<float>* ps_server_;
