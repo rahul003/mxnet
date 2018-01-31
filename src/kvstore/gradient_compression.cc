@@ -211,21 +211,7 @@ void GradientCompression::DequantizeForSum(const mxnet::NDArray &from, mxnet::ND
        }, from.ctx(), {from.var()}, {to->var()},
        mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DequantizeForSumCPU"));
     } else {
-#if MXNET_USE_CUDA
-      if (a == mshadow::gpu::kDevMask && b == mshadow::gpu::kDevMask) {
-      mxnet::Engine::Get()->PushSync([from, to](mxnet::RunContext ctx) {
-        std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
-        Dequantize2BitForSumImpl(ctx.get_stream<mshadow::gpu>(), inputs);
-        // Wait GPU kernel to complete
-        ctx.get_stream<mshadow::gpu>()->Wait();
-      }, from.ctx(), {from.var()}, {to->var()},
-      mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DequantizeForSumGPU"));
-    } else {
-      LOG(FATAL) << "unknown device mask";
-    }
-#else
-      LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
-#endif
+      LOG(FATAL) << "DequantizeForSum can only work on CPU"; 
     }
   } else {
     LOG(FATAL) << "Unsupported dequantization of type " << get_type_str();
@@ -237,8 +223,6 @@ void GradientCompression::Requantize(const int num_workers, const int original_s
                                      const int priority) {
   CHECK(from.shape().ndim() != 0) << "source operands has zero dimension shape";
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
-  const int a = from.ctx().dev_mask();
-  const int b = to->ctx().dev_mask();
   if (type_ == CompressionType::kTwoBit) {
       mxnet::Engine::Get()->PushSync([from, to, num_workers, original_size](mxnet::RunContext ctx) {
                                        std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};

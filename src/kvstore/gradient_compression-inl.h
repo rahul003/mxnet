@@ -184,7 +184,7 @@ inline void Dequantize2BitForSumImpl(mshadow::Stream<mshadow::cpu> *s,
 }
 
 
-int gcd(int a, int b) {
+inline int gcd(int a, int b) {
   int t;
   while (b != 0) {
     t = b;
@@ -194,7 +194,7 @@ int gcd(int a, int b) {
   return a;
 }
 
-int lcm(int a, int b) {
+inline int lcm(int a, int b) {
   return (a*b)/gcd(a, b);
 }
 
@@ -255,7 +255,7 @@ inline void Requantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
   int block_size = lcm(num_workers, 32) / 32;
 
   // number of bits used for each value
-  int num_bits = (int) ceil(log2(2 * num_workers + 1));
+  int num_bits = (int) ceil(log2(float(2 * num_workers + 1)));
 
   if (num_bits > 8) {
     LOG(FATAL) << "Gradient compression unsupported for this type and number of workers right now";
