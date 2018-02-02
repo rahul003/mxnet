@@ -89,6 +89,7 @@ class KVStoreDistServer {
     std::vector<ps::KVMeta> request;
     NDArray array;
 
+    NDArray int_array;
     // used for gradient compression to merge quantized array
     NDArray requantized;
   };
@@ -125,6 +126,7 @@ class KVStoreDistServer {
     }
     return;
   }
+
   inline void ApplyUpdates(const int key, MergeBuf *merged, NDArray *stored,
                            ps::KVServer<real_t>* server) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
@@ -153,22 +155,7 @@ class KVStoreDistServer {
 
   inline void ApplyUpdates2(const int key, MergeBuf *merged, ps::KVServer<real_t>* server, int original_size) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
-      gradient_compression_->Requantize(ps::NumWorkers(), original_size, merged->array, &(merged->requantized), 0);
-      // let the main thread to execute updater_, which is necessary for python
-//      if (updater_) {
-//        TODO check if this is needed. updater might be pushing to engine and dependency would be managed
-//        merged->array.WaitToRead();
-//        exec_.Exec([this, key, merged, stored](){
-//            CHECK(updater_);
-//            updater_(key, merged->array, stored);
-//          });
-//      } else {
-//         if no updater, just copy
-//        CopyFromTo(merged->array, stored);
-//      }
-//      if (log_verbose_)  {
-//        LOG(INFO) << "sync response to " << merged->request.size() << " workers";
-//      }
+      gradient_compression_->Requantize(ps::NumWorkers(), original_size, merged->int_array, &(merged->requantized), 0);
       for (const auto &req : merged->request) {
         server->Response(req);
       }
@@ -359,6 +346,7 @@ class KVStoreDistServer {
   void DataHandleCompressed(const ps::KVMeta& req_meta,
                             const ps::KVPairs<real_t> &req_data,
                             ps::KVServer<real_t>* server) {
+    std::cout<<"receiving datahandlecompressed"<<std::endl;
     if (req_meta.push) {
       // there used several WaitToRead, this is because \a recved's memory
       // could be deallocated when this function returns. so we need to make sure
@@ -395,14 +383,14 @@ class KVStoreDistServer {
       if (sync_mode_) {
         // synced push
         auto& merged = merge_buf_[key];
-        if (merged.array.is_none()) {
-          merged.array = NDArray(dshape, Context());
-          merged.array = 0;
+        if (merged.int_array.is_none()) {
+          merged.int_array = NDArray(dshape, Context(), false, mshadow::kInt32);
+          merged.int_array = 0;
           TShape requant_shape = TShape{gradient_compression_->
                                         GetRecompressedSize(ps::NumWorkers(), (int64_t) original_size)};
-          merged.requantized = NDArray(requant_shape, Context(), false, mshadow::kInt32);
+          merged.requantized = NDArray(requant_shape, Context());
         }
-        gradient_compression_->DequantizeForSum(recved, &merged.array, 0);
+        gradient_compression_->DequantizeForSum(recved, &merged.int_array, 0);
         merged.request.push_back(req_meta);
         ApplyUpdates2(key, &merged, server, original_size);
       } else {
@@ -421,13 +409,21 @@ class KVStoreDistServer {
       CHECK_EQ(req_data.keys.size(), (size_t)1);
       CHECK_EQ(req_data.lens.size(), (size_t)0);
       int key = DecodeKey(req_data.keys[0]);
-      DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server);
+
+      if (!merge_buf_[key].requantized.is_none()) {
+        DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server);  
+      } else {
+        CHECK_EQ(1,0);
+        DefaultStorageResponse(key, store_[key], req_meta, req_data, server);  
+      }
+      
     }
   }
 
   void DataHandleDefault(const ps::KVMeta& req_meta,
                          const ps::KVPairs<real_t> &req_data,
                          ps::KVServer<real_t>* server) {
+    std::cout<<"receiving datahandledefault"<<std::endl;
     CHECK_EQ(req_meta.cmd, static_cast<int>(DataHandleType::kDefaultPushPull));
     // do some check
     CHECK_EQ(req_data.keys.size(), (size_t)1);

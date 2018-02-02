@@ -30,6 +30,7 @@
 #include <unordered_map>
 #include <string>
 #include <functional>
+#include <condition_variable>
 #include <atomic>
 #include <future>
 #include "../../src/kvstore/gradient_compression.h"

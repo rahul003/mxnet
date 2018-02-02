@@ -34,6 +34,20 @@
 namespace mxnet {
 namespace kvstore {
 
+inline int gcd(int a, int b) {
+  int t;
+  while (b != 0) {
+    t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+
+inline int lcm(int a, int b) {
+  return (a*b)/gcd(a, b);
+}
+
 enum class CompressionType {
   kNone, kTwoBit
 };
@@ -99,10 +113,15 @@ class GradientCompression {
    */
   int64_t GetCompressedSize(const int64_t original_size);
 
-  /*!
-   * returns recompressed size after merging partially dequantized gradients from each worker
-   * @param num_workers
-   */
+
+  int GetRequantizeBlockSize(const int num_workers);
+  int GetRequantizeNumBits(const int num_workers);
+  int64_t GetRequantizeOriginalSize(const int num_workers, const int64_t compr_size);
+
+    /*!
+     * returns recompressed size after merging partially dequantized gradients from each worker
+     * @param num_workers
+     */
   int64_t GetRecompressedSize(const int num_workers, const int64_t original_size);
 
   /*!
@@ -125,6 +144,8 @@ class GradientCompression {
   * \param priority Priority of the action.
   */
   void Dequantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
+  void Derequantize(const int num_workers, const int original_size,
+                    const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
   void DequantizeForSum(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
   void Requantize(const int num_workers, const int original_size,
                   const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
