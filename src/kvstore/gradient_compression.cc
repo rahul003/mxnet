@@ -108,6 +108,13 @@ int GradientCompression::GetCompressionFactor() {
   }
 }
 
+int64_t GradientCompression::GetCompressedSize(const int64_t original_size) {
+  const int bits = GetCompressionFactor();
+  return ((original_size % bits == 0) ?
+          original_size / bits :
+          original_size / bits + 1);
+}
+
 int64_t GradientCompression::GetRecompressedSize(const int num_workers, const int64_t original_size) {
   if (type_ == CompressionType::kTwoBit) {
     return ceil((original_size * ceil(log2(2 * num_workers + 1))) / 32);
@@ -117,11 +124,19 @@ int64_t GradientCompression::GetRecompressedSize(const int num_workers, const in
   }
 }
 
-int64_t GradientCompression::GetCompressedSize(const int64_t original_size) {
-  const int bits = GetCompressionFactor();
-  return ((original_size % bits == 0) ?
-          original_size / bits :
-          original_size / bits + 1);
+// returns number of floats in requantized data Block
+int GradientCompression::GetRequantizeBlockSize(const int num_workers) {
+  return lcm(num_workers, 32) / 32;
+}
+
+int64_t GradientCompression::GetRequantizeOriginalSize(const int num_workers, const int64_t compr_size) {
+  int num_bits = GetRequantizeNumBits(num_workers);
+  CHECK_EQ(compr_size % num_bits, 0);
+  return compr_size / num_bits;
+}
+
+int GradientCompression::GetRequantizeNumBits(const int num_workers) {
+  return (int) ceil(log2(float(2 * num_workers + 1)));
 }
 
 void GradientCompression::Quantize(const mxnet::NDArray &from, mxnet::NDArray *to,
@@ -197,6 +212,30 @@ void GradientCompression::Dequantize(const mxnet::NDArray &from, mxnet::NDArray 
   }
 }
 
+void GradientCompression::Derequantize(const int num_workers, const int original_size,
+                                       const mxnet::NDArray &from, mxnet::NDArray *to,
+                                       const int priority) {
+  CHECK(from.shape().ndim() != 0) << "source operands has zero dimension shape";
+  CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
+  const int a = from.ctx().dev_mask();
+  const int b = to->ctx().dev_mask();
+  const float threshold = threshold_;
+  if (type_ == CompressionType::kTwoBit) {
+    if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
+      mxnet::Engine::Get()->PushSync([from, to, threshold, num_workers, original_size](mxnet::RunContext ctx) {
+                                       std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
+                                       DerequantizeImpl(ctx.get_stream<mshadow::cpu>(), inputs, threshold,
+                                                        num_workers, original_size);
+                                     }, from.ctx(), {from.var()}, {to->var()},
+                                     mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DerequantizeCPU"));
+    } else {
+      LOG(FATAL) << "This operation is only for CPU";
+    }
+  } else {
+    LOG(FATAL) << "Unsupported dequantization of type " << get_type_str();
+  }
+}
+
 void GradientCompression::DequantizeForSum(const mxnet::NDArray &from, mxnet::NDArray *to,
                                            const int priority) {
   CHECK(from.shape().ndim() != 0) << "source operands has zero dimension shape";
@@ -226,8 +265,8 @@ void GradientCompression::Requantize(const int num_workers, const int original_s
   if (type_ == CompressionType::kTwoBit) {
       mxnet::Engine::Get()->PushSync([from, to, num_workers, original_size](mxnet::RunContext ctx) {
                                        std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
-                                       Requantize2BitImpl(ctx.get_stream<mshadow::cpu>(),
-                                                          inputs, num_workers, original_size);
+                                       RequantizeImpl(ctx.get_stream<mshadow::cpu>(),
+                                                      inputs, num_workers, original_size);
                                      }, from.ctx(), {from.var()}, {to->var()},
                                      mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("RequantizeCPU"));
 

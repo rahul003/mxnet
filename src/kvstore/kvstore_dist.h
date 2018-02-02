@@ -34,6 +34,10 @@
 #include "./kvstore_dist_server.h"
 #include "kvstore_dist_server.h"
 
+// sleep
+#include <chrono>
+#include <thread>
+
 #if MKL_EXPERIMENTAL == 1
 #include <mkl_memory.h>
 #include "../operator/mkl/mkl_memory-inl.h"
@@ -41,6 +45,68 @@
 #endif
 namespace mxnet {
 namespace kvstore {
+
+/**
+ * \brief executor runs a function using the thread called \ref Start
+ */
+class Executor2 {
+  public:
+    /**
+     * \brief start the executor
+     */
+    void Start() {
+      std::unique_lock<std::mutex> lk(mu_);
+      while (true) {
+        cond_.wait(lk, [this]{return !queue_.empty();});
+        Block blk = std::move(queue_.front());
+        queue_.pop();
+        lk.unlock();
+
+        if (blk.f) {
+          blk.f(); blk.p->set_value();
+        } else {
+          blk.p->set_value(); break;
+        }
+        lk.lock();
+      }
+    }
+
+    /**
+     * \brief function
+     */
+    typedef std::function<void()> Func;
+
+    /**
+     * \brief let the thread called \ref Start to exec a function. threadsafe
+     */
+    void Exec(const Func& func) {
+      Block blk(func);
+      auto fut = blk.p->get_future();
+      {
+        std::lock_guard<std::mutex> lk(mu_);
+        queue_.push(std::move(blk));
+        cond_.notify_one();
+      }
+      fut.wait();
+    }
+
+    /**
+     * \brief stop the thread, threadsafe
+     */
+    void Stop() {
+      Exec(Func());
+    }
+
+  private:
+    struct Block {
+      explicit Block(const Func& func) : f(func), p(std::make_shared<std::promise<void>>()) { }
+      Func f;
+      std::shared_ptr<std::promise<void>> p;
+    };
+    std::queue<Block> queue_;
+    std::mutex mu_;
+    std::condition_variable cond_;
+  };
 
   /**
  * \brief distributed kvstore
@@ -158,6 +224,7 @@ class KVStoreDist : public KVStoreLocal {
   struct ComprPSKV {
     PSKV push;
     PSKV pull;
+    PSKV inactive_pull;
   };
 
   /**
@@ -208,6 +275,7 @@ class KVStoreDist : public KVStoreLocal {
   void PullImpl(const std::vector<int>& keys,
                 const std::vector<NDArray*>& values,
                 int priority) override {
+
     std::vector<int> uniq_keys;
     std::vector<std::vector<NDArray*> > grouped_vals;
     GroupKVPairsPull(keys, values, &uniq_keys, &grouped_vals);
@@ -217,6 +285,7 @@ class KVStoreDist : public KVStoreLocal {
       // use the same array for merging to guarantee that pull always happens
       // after the previous push on this key
       auto& recv_buf = comm_buf_[key];
+      auto& recv_compr_buf = compr_pull_buf_[key];
       const auto storage_type = grouped_vals[i][0]->storage_type();
       CHECK_EQ(storage_type, kDefaultStorage)
                << "Expected stype of value to be kDefaultStorage";
@@ -225,54 +294,98 @@ class KVStoreDist : public KVStoreLocal {
         recv_buf = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_,
                            true, grouped_vals[i][0]->dtype());
       }
-      auto pull_from_servers = [this, key, recv_buf](
-          RunContext rctx, Engine::CallbackOnComplete cb) {
-        // convert to ps keys
-        size_t size = recv_buf.shape().Size();
 
-        PSKV& pskv = (gradient_compression_->get_type() == CompressionType::kNone) ?
-                      EncodeDefaultKey(key, size, false) :
-                      EncodeCompressedKey(key, size, false);
-#if MKL_EXPERIMENTAL == 1
-        mkl_set_tblob_eager_mode(recv_buf.data());
-#endif
-        real_t* data = recv_buf.data().dptr<real_t>();
-        // false means not to delete data when SArray is deleted
-        auto vals = new ps::SArray<real_t>(data, size, false);
-        // issue pull
-        int cmd = (gradient_compression_->get_type() != CompressionType::kNone) ?
-                  static_cast<int>(DataHandleType::kCompressedPushPull) :
-                  static_cast<int>(DataHandleType::kDefaultPushPull);
-        CHECK_NOTNULL(ps_worker_)->ZPull(
-          pskv.keys, vals, &pskv.lens, cmd, [vals, cb](){ delete vals; cb(); });
-      };
+      if (gradient_compression_->get_type() == CompressionType::kNone) {
+        first_pull_done_[key] = true;
+        auto pull_from_servers = [this, key, recv_buf](
+        RunContext rctx, Engine::CallbackOnComplete cb) {
+          // convert to ps keys
+          size_t size = recv_buf.shape().Size();
 
-      CHECK_NOTNULL(Engine::Get())->PushAsync(
-          pull_from_servers,
-          pinned_ctx_,
-          {},
-          {recv_buf.var()},
-          FnProperty::kNormal,
-          priority,
-          PROFILER_MESSAGE("KVStoreDistDefaultStoragePull"));
+          PSKV &pskv = EncodeDefaultKey(key, size, false);
+          #if MKL_EXPERIMENTAL == 1
+          mkl_set_tblob_eager_mode(recv_buf.data());
+          #endif
+          real_t *data = recv_buf.data().dptr<real_t>();
+          // false means not to delete data when SArray is deleted
+          auto vals = new ps::SArray<real_t>(data, size, false);
+          // issue pull
+          int cmd = static_cast<int>(DataHandleType::kDefaultPushPull);
+          CHECK_NOTNULL(ps_worker_)->ZPull(
+          pskv.keys, vals, &pskv.lens, cmd, [vals, cb]() {
+            delete vals;
+            cb();
+          });
+        };
+        CHECK_NOTNULL(Engine::Get())->PushAsync(
+        pull_from_servers,
+        pinned_ctx_,
+        {},
+        {recv_buf.var()},
+        FnProperty::kNormal,
+        priority,
+        PROFILER_MESSAGE("KVStoreDistDefaultStoragePull"));
+        comm_->Broadcast(key, recv_buf, grouped_vals[i], priority);
 
-      NDArray stored = store_[key];
-      NDArray recvd = decomp_buf_[key];
-      if (gradient_compression_->get_type() != CompressionType::kNone) {
-        gradient_compression_->Dequantize(recv_buf, &recvd, priority);
       } else {
-        recvd = recv_buf;
+        if (recv_compr_buf.is_none()) {
+          TShape recompr_shape = TShape{gradient_compression_->
+          GetRecompressedSize(ps::NumWorkers(),
+                              (int64_t) grouped_vals[i][0]->shape().Size())};
+          recv_compr_buf = NDArray(recompr_shape, pinned_ctx_,
+                                   true, grouped_vals[i][0]->dtype());
+        }
+        auto pull_from_servers = [this, key, recv_buf, recv_compr_buf](
+        RunContext rctx, Engine::CallbackOnComplete cb) {
+          // convert to ps keys
+          size_t size = recv_compr_buf.shape().Size();
+          PSKV &pskv = EncodeCompressedKey(key, size, false, first_pull_done_[key]);
+          #if MKL_EXPERIMENTAL == 1
+          mkl_set_tblob_eager_mode(recv_buf.data());
+          #endif
+          real_t *data = recv_compr_buf.data().dptr<real_t>();
+
+          if (!first_pull_done_[key]) first_pull_done_[key] = true;
+
+          // false means not to delete data when SArray is deleted
+          auto vals = new ps::SArray<real_t>(data, size, false);
+          // issue pull
+          int cmd = static_cast<int>(DataHandleType::kCompressedPushPull);
+          CHECK_NOTNULL(ps_worker_)->ZPull(
+          pskv.keys, vals, &pskv.lens, cmd, [vals, cb]() {
+            delete vals;
+            cb();
+          });
+        };
+        CHECK_NOTNULL(Engine::Get())->PushAsync(
+        pull_from_servers,
+        pinned_ctx_,
+        {},
+        {recv_compr_buf.var(), recv_buf.var()},
+        FnProperty::kNormal,
+        priority,
+        PROFILER_MESSAGE("KVStoreDistDefaultStoragePullCompressed"));
+
+        NDArray stored = store_[key];
+        NDArray recvd = decomp_buf_[key];
+
+        if (recvd.is_none()) {
+          recvd = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_, false, stored.dtype());
+        }
+        gradient_compression_->Derequantize(ps::NumWorkers(), stored.shape().Size(),
+                                            recv_compr_buf, &recvd, priority);
+        if (updater_) {
+          exec_.Exec([this, key, recvd, &stored](){
+            CHECK(updater_);
+            updater_(key, recvd, &stored);
+          });
+        } else {
+          //todo check async logic
+          stored = recvd;
+        }
+        comm_->Broadcast(key, stored, grouped_vals[i], priority);
+
       }
-      if (updater_) {
-        exec_.Exec([this, key, recvd, &stored](){
-          CHECK(updater_);
-          updater_(key, recvd, &stored);
-        });
-      } else {
-        //todo check async logic
-        stored = recvd;
-      }
-      comm_->Broadcast(key, stored, grouped_vals[i], priority);
     }
   }
 
@@ -332,6 +445,7 @@ class KVStoreDist : public KVStoreLocal {
     for (size_t i = 0; i < uniq_keys.size(); ++i) {
       // merge over devices
       int key = uniq_keys[i];
+      std::cout<<ps::MyRank()<<" pushing key:"<<key<<std::endl;
       const auto& vals = grouped_vals[i];
       NDArray merged = store_[key];
       merged = do_merge ? comm_->Reduce(key, vals, priority) : vals[0];
@@ -370,8 +484,10 @@ class KVStoreDist : public KVStoreLocal {
           // we want inactive gc to send uncompressed gradients,
           // but sharded in the same way as later pushes would when gc becomes active
           if (is_active) {
+            std::cout<<ps::MyRank()<<" pushing compressed key "<<key<<std::endl;
             PushCompressed(key, comm_buf, pskv, priority);
           } else {
+            std::cout<<ps::MyRank()<<" pushing default key "<<key<<std::endl;
             PushDefault(key, comm_buf, pskv, priority);
           }
         }
@@ -585,12 +701,17 @@ class KVStoreDist : public KVStoreLocal {
    * Divides original array into equal parts for each server
    * Populates both push and pull pskv on first call
    */
-  inline PSKV& EncodeCompressedKey(int key, size_t original_size, bool is_push) {
+  inline PSKV& EncodeCompressedKey(int key, size_t original_size, bool is_push, bool is_active = true) {
     auto krs = ps::Postoffice::Get()->GetServerKeyRanges();
     int num_servers = krs.size();
+    int num_workers = ps::NumWorkers();
     CHECK_GT(num_servers, 0);
 
-    // represents size of data to be sent
+    size_t pull_compr_size = gradient_compression_->GetRecompressedSize(num_workers, original_size);
+    int block_size = gradient_compression_->GetRequantizeBlockSize(num_workers);
+    int num_blocks = pull_compr_size / block_size;
+
+    // represents size of data to be sent by worker
     size_t compr_size = gradient_compression_->GetCompressedSize(original_size);
 
     mu_.lock();
@@ -598,8 +719,9 @@ class KVStoreDist : public KVStoreLocal {
     mu_.unlock();
 
     if (!pskv.keys.empty()) {
-      size_t size = (is_push) ? compr_size : original_size;
-      CHECK_EQ(static_cast<size_t >(pskv.size), size)<< "The value size can't be changed";
+      CHECK(is_active);
+      size_t size = (is_push) ? compr_size: pull_compr_size;
+      CHECK_EQ(static_cast<size_t >(pskv.size), size)<< ps::MyRank()<< ": The value size can't be changed";
     } else {
       // populate both pull and push pskvs
       // push pskv has sizes corresponding to compressed data
@@ -607,6 +729,7 @@ class KVStoreDist : public KVStoreLocal {
       mu_.lock();
       PSKV& pull_pskv = compr_ps_kv_[key].pull;
       PSKV& push_pskv = compr_ps_kv_[key].push;
+      PSKV& inactive_pull_pskv = compr_ps_kv_[key].inactive_pull;
       mu_.unlock();
 
       if (original_size < bigarray_bound_) {
@@ -620,26 +743,34 @@ class KVStoreDist : public KVStoreLocal {
         push_pskv.lens.push_back(0);
         // data
         push_pskv.keys.push_back(ps_key);
-        pull_pskv.keys.push_back(ps_key);
         push_pskv.lens.push_back(compr_size);
-        pull_pskv.lens.push_back(original_size);
         push_pskv.size = compr_size;
-        pull_pskv.size = original_size;
+
+        pull_pskv.keys.push_back(ps_key);
+        pull_pskv.lens.push_back(pull_compr_size);
+        pull_pskv.size = pull_compr_size;
+
+        inactive_pull_pskv.keys.push_back(ps_key);
+        inactive_pull_pskv.lens.push_back(original_size);
+        inactive_pull_pskv.size = original_size;
       } else {
         // partition it to all servers
         push_pskv.size = 0;
         pull_pskv.size = 0;
 
         for (int i = 0; i < num_servers; ++i) {
-          size_t part_compr, part_orig;
+          size_t push_part, part_orig, pull_part, part_blocks;
           if (i == num_servers-1) {
-            part_compr = compr_size - push_pskv.size;
-            part_orig = original_size - pull_pskv.size;
+            pull_part = pull_compr_size - pull_pskv.size;
+            push_part = compr_size - push_pskv.size;
+            part_orig = gradient_compression_->GetRequantizeOriginalSize(num_workers, pull_part);
           } else {
-            part_compr =
-              static_cast<size_t> (round(static_cast<double>(compr_size)/num_servers*(i+1))) -
-              static_cast<size_t> (round(static_cast<double>(compr_size)/num_servers*(i)));
-            part_orig = part_compr * gradient_compression_->GetCompressionFactor();
+            part_blocks = static_cast<size_t> (round(static_cast<double>(num_blocks)/num_servers*(i+1))) -
+                          static_cast<size_t> (round(static_cast<double>(num_blocks)/num_servers*(i)));
+            pull_part = part_blocks * block_size;
+
+            part_orig = gradient_compression_->GetRequantizeOriginalSize(num_workers, pull_part);
+            push_part = gradient_compression_->GetCompressedSize(part_orig);
           }
 
           // meta info
@@ -653,18 +784,25 @@ class KVStoreDist : public KVStoreLocal {
           CHECK_LT(ps_key, krs[i].end());
           push_pskv.keys.push_back(ps_key);
           pull_pskv.keys.push_back(ps_key);
+          inactive_pull_pskv.keys.push_back(ps_key);
+
           // push_pskv stores lengths of compressed blocks
-          push_pskv.lens.push_back(part_compr);
-          // pull_pskv stores lengths of original data
-          pull_pskv.lens.push_back(part_orig);
-          push_pskv.size += part_compr;
-          pull_pskv.size += part_orig;
+          push_pskv.lens.push_back(push_part);
+          push_pskv.size += push_part;
+
+          pull_pskv.lens.push_back(pull_part);
+          pull_pskv.size += pull_part;
+
+          inactive_pull_pskv.lens.push_back(part_orig);
+          inactive_pull_pskv.size += part_orig;
         }
         CHECK_EQ(static_cast<size_t>(push_pskv.size), compr_size);
-        CHECK_EQ(static_cast<size_t>(pull_pskv.size), original_size);
+        CHECK_EQ(static_cast<size_t>(pull_pskv.size), pull_compr_size);
+        CHECK_EQ(static_cast<size_t>(inactive_pull_pskv.size), original_size);
         CHECK_EQ(push_pskv.lens.size(), num_servers*2);
-        }
       }
+      if (!is_active) return inactive_pull_pskv;
+    }
     return pskv;
   }
 
@@ -727,7 +865,7 @@ class KVStoreDist : public KVStoreLocal {
     }
     return pskv;
   }
-  Executor exec_;
+  Executor2 exec_;
 
   /**
    * \brief for worker to push and pull data
@@ -757,8 +895,10 @@ class KVStoreDist : public KVStoreLocal {
    * is push
    */
   std::unordered_map<int, NDArray> compr_buf_;
+  std::unordered_map<int, NDArray> compr_pull_buf_;
   std::unordered_map<int, NDArray> decomp_buf_;
 
+  std::unordered_map<int, bool> first_pull_done_;
   /**
    * \brief residual buffer to accumulate quantization error
    * during gradient compression
