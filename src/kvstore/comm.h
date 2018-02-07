@@ -63,6 +63,9 @@ class Comm {
       int key, const NDArray& src,
       const std::vector<NDArray*> dst, int priority) = 0;
 
+  // broadcasts requantized array to each context, then dequantizes the array htere into given args
+  virtual void BroadcastRequantized(int key,
+                            const std::vector<NDArray*> dst_fullsize, int priority) = 0;
   /**
    * \brief broadcast src to dst[i] with target row_ids for every i
    * \param dst a list of destination row_sparse NDArray and its target row_ids to broadcast,
@@ -117,6 +120,11 @@ class CommCPU : public Comm {
     } else {
       merge_buf_[key].merged = NDArray(stype, shape, pinned_ctx_, true, type);
     }
+  }
+
+  void BroadcastRequantized(int key,
+                                    const std::vector<NDArray*> dst_fullsize, int priority) override {
+
   }
 
   const NDArray& Reduce(int key, const std::vector<NDArray>& src,
@@ -513,7 +521,7 @@ class CommDevice : public Comm {
     // when this reduce is called from kvstore_dist, gc is not set
     // we don't do compression twice in dist_sync_device
     if ((gc_ != nullptr) && (gc_->get_type() != CompressionType::kNone)) {
-      return ReduceCompressed(key, src, priority);
+      return HalfReduceCompressed(key, src, priority);
     }
 
     // avoid extra copy for single device, but it may bring problems for
@@ -608,6 +616,80 @@ class CommDevice : public Comm {
     }
     ElementwiseSum(reduce, &buf.merged);
     return buf.merged;
+  }
+
+  const NDArray& HalfReduceCompressed(int key, const std::vector<NDArray>& src,
+                                  int priority) {
+    InitBuffersAndComm(src);
+    auto& buf = merge_buf_[key];
+    std::vector<NDArray> reduce(src.size());
+    if (buf.copy_buf.empty()) {
+      // one buf for each context
+      buf.copy_buf.resize(src.size());
+      buf.compressed_recv_buf.resize(src.size());
+      buf.compressed_send_buf.resize(src.size());
+      buf.residual.resize(src.size());
+      buf.int_array.resize(src.size());
+
+      for (size_t i = 0; i < src.size(); ++i) {
+        buf.copy_buf[i] = NDArray(buf.merged.shape(), buf.merged.ctx(),
+                                  false, buf.merged.dtype());
+        buf.residual[i] = NDArray(buf.merged.shape(), src[i].ctx(),
+                                  false, buf.merged.dtype());
+        buf.residual[i] = 0;
+        int64_t small_size = gc_->GetCompressedSize(buf.merged.shape().Size());
+        buf.compressed_recv_buf[i] = NDArray(TShape{small_size}, buf.merged.ctx(),
+                                             false, buf.merged.dtype());
+        buf.compressed_send_buf[i] = NDArray(TShape{small_size}, src[i].ctx(),
+                                             false, buf.merged.dtype());
+        buf.int_array[i] = NDArray(buf.merged.shape(), buf.merged.ctx(), false, mshadow::kInt32);
+        buf.int_array[i] = 0;
+      }
+    }
+
+    for (size_t i = 0; i < src.size(); ++i) {
+      // compress before copy
+      // this is done even if the data is on same context as copy_buf because
+      // we don't want the training to be biased towards data on this GPU
+      gc_->Quantize(src[i], &(buf.compressed_send_buf[i]), &(buf.residual[i]), priority);
+
+      if (buf.compressed_send_buf[i].ctx() != buf.compressed_recv_buf[i].ctx()) {
+        CopyFromTo(buf.compressed_send_buf[i], &(buf.compressed_recv_buf[i]), priority);
+      } else {
+        // avoid memory copy when they are on same context
+        buf.compressed_recv_buf[i] = buf.compressed_send_buf[i];
+      }
+      gc_->DequantizeForSum(buf.compressed_recv_buf[i], &(buf.int_array[i]), priority);
+//      gc_->Dequantize(buf.compressed_recv_buf[i], &(buf.copy_buf[i]), priority);
+      reduce[i] = buf.int_array[i];
+    }
+    ElementwiseSum(reduce, &buf.merged_int_array);
+
+    NDArray& requantized = requantized_send_buf_[key];
+
+    if (requantized.is_none()) {
+      std::cout<<"Created requantized send buf for key "<<key<<std::endl;
+      requantized = NDArray(TShape{gc_->GetRecompressedSize(src.size(), buf.merged_int_array.shape().Size())},
+                            buf.merged.ctx(), false, src[0].dtype());
+    }
+    gc_->Requantize(src.size(), buf.merged.shape().Size(), buf.merged_int_array, &requantized, priority);
+    return requantized;
+  }
+
+  // broadcasts requantized array to each context, then dequantizes the array htere into given args
+  void BroadcastRequantized(int key,
+                 const std::vector<NDArray*> dst_fullsize, int priority) override {
+    std::vector<NDArray>& dst = merge_buf_[key].requantized_recv_buf;
+    dst.resize(dst_fullsize.size());
+    auto& requantized = requantized_send_buf_[key];
+    for (size_t i = 0; i < dst_fullsize.size(); ++i) {
+      dst[i] = NDArray(requantized.shape(), dst_fullsize[i]->ctx(),
+                                false, dst_fullsize[i]->dtype());
+      CHECK(!requantized.is_none()) << "key : "<<key;
+      CopyFromTo(requantized, dst[i], priority);
+      gc_->Derequantize(dst_fullsize.size(), dst_fullsize[0]->shape().Size(),
+                        dst[i], dst_fullsize[i], priority);
+    }
   }
 
   void Broadcast(int key, const NDArray& src,
@@ -755,6 +837,7 @@ class CommDevice : public Comm {
       }
       if (stype == kDefaultStorage) {
         buf.merged = NDArray(shape, ctx, false, type);
+        buf.merged_int_array = NDArray(shape, ctx, false, mshadow::kInt32);
       } else {
         buf.merged = NDArray(stype, shape, ctx, true, type);
       }
@@ -776,8 +859,13 @@ class CommDevice : public Comm {
     std::vector<NDArray> compressed_send_buf;
     /// \brief the small buffer for compressed data in receiver
     std::vector<NDArray> compressed_recv_buf;
+    std::vector<NDArray> requantized_recv_buf;
+    std::vector<NDArray> int_array;
+    NDArray merged_int_array;
+
   };
   std::unordered_map<int, BufferEntry> merge_buf_;
+  std::unordered_map<int, NDArray> requantized_send_buf_;
   bool inited_;
 };
 

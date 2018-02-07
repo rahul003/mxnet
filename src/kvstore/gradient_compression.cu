@@ -37,5 +37,26 @@ void Dequantize2BitImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& input
   Dequantize2BitKernelLaunch(s, inputs, threshold);
 }
 
+void Dequantize2BitForSumImpl(mshadow::Stream<mshadow::gpu> *s,
+                                     const std::vector<mxnet::TBlob> &inputs) {
+  Dequantize2BitForSumKernelLaunch(s, inputs);
+}
+
+void RequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
+                           const std::vector<mxnet::TBlob> &inputs,
+                           const int num_workers,
+                           const int original_size) {
+  RequantizeKernelLaunch(s, inputs, num_workers, original_size);
+}
+
+void DerequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
+                             const std::vector<mxnet::TBlob> &inputs,
+                             const float threshold,
+                             const int num_workers,
+                             const int original_size) {
+  DerequantizeKernelLaunch(s, inputs, threshold, num_workers, original_size);
+}
+
+
 }  // namespace kvstore
 }  // namespace mxnet

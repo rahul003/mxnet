@@ -175,17 +175,20 @@ struct half_dequantize_2bit {
   }
 };
 
-inline void Dequantize2BitForSumImpl(mshadow::Stream<mshadow::cpu> *s,
-                                     const std::vector<mxnet::TBlob> &inputs) {
-  mxnet::op::mxnet_op::Kernel<half_dequantize_2bit, mshadow::cpu>
+template<typename xpu>
+inline void Dequantize2BitForSumKernelLaunch(mshadow::Stream<xpu> *s,
+                                             const std::vector<mxnet::TBlob> &inputs) {
+  mxnet::op::mxnet_op::Kernel<half_dequantize_2bit, xpu>
   ::Launch(s,
            inputs[1].Size(),         // original size
            inputs[1].dptr<int>(),  // to array
            inputs[0].dptr<float>()); // from array
 }
 
-
-
+inline void Dequantize2BitForSumImpl(mshadow::Stream<mshadow::cpu> *s,
+                                     const std::vector<mxnet::TBlob> &inputs) {
+  Dequantize2BitForSumKernelLaunch(s, inputs);
+}
 
 struct requantize {
   MSHADOW_XINLINE static void Map(int out_block_id,   // id of parallel kernel
@@ -271,23 +274,21 @@ struct derequantize {
       unsigned char *byte_ptr = reinterpret_cast < unsigned char * > (compr_float);
       while ((end_pos != block_size * 32) &&
              (!is_last || (is_last && num_prev_elems < original_size ))) {
-
         if (end_pos / 8 == st_pos / 8) {
-          unsigned char *curr_val = reinterpret_cast < unsigned char * >
-                                        ((*byte_ptr) >> (8 - (end_pos % 8) - 1));
-          *curr_val &= bitmask;
-          *(out++) = ((int) *curr_val - num_workers) * threshold;
+          int curval = *byte_ptr;
+          curval >>= (8 - (end_pos % 8) - 1);
+          curval &= bitmask;
+          *(out++) = ( curval - num_workers) * threshold;
         } else {
-          unsigned char *curr_val = reinterpret_cast < unsigned char * >
-                                        ((*byte_ptr) >> (8 - (end_pos % 8) - 1));
+//          uint8_t curval = ((*byte_ptr) >> (8 - (end_pos % 8) - 1));
           uint8_t num_bits_overflowed = (end_pos + 1) % 8;
           // left shift bits into position
-          *curr_val = *(byte_ptr++) << num_bits_overflowed;
-          *curr_val &= bitmask;
+          uint8_t curval = *(byte_ptr++) << num_bits_overflowed;
+          curval &= bitmask;
           // now bring next byte bits here
           // TODO confirm byteptr is unaffected
-          *curr_val |= (*byte_ptr >> (8 - num_bits_overflowed));
-          *(out++) = ((int) *curr_val - num_workers) * threshold;
+          curval |= (*byte_ptr >> (8 - num_bits_overflowed));
+          *(out++) = (curval - num_workers) * threshold;
         }
         num_prev_elems++;
 
@@ -300,8 +301,8 @@ struct derequantize {
   }
 };
 
-
-inline void RequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
+template<typename xpu>
+inline void RequantizeKernelLaunch(mshadow::Stream<xpu> *s,
                            const std::vector<mxnet::TBlob> &inputs,
                            const int num_workers,
                            const int original_size) {
@@ -314,7 +315,7 @@ inline void RequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
     LOG(FATAL) << "Gradient compression unsupported for this type and number of workers right now";
   }
 
-  mxnet::op::mxnet_op::Kernel<requantize, mshadow::cpu>
+  mxnet::op::mxnet_op::Kernel<requantize, xpu>
   ::Launch(s,
            (inputs[1].Size()) / block_size,   // number of parallel kernels, one for each block
            (inputs[1].Size()) / block_size, // number of blocks
@@ -322,11 +323,11 @@ inline void RequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
            original_size,            // original size
            num_workers,              // num_workers
            num_bits,                 // num_bits
-           inputs[1].dptr<float>(),  // compressed array
-           inputs[0].dptr<int>());   // sum array
+           inputs[1].dptr<float>(),  // to compressed array
+           inputs[0].dptr<int>());   // from int array
 }
-
-inline void DerequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
+template<typename xpu>
+inline void DerequantizeKernelLaunch(mshadow::Stream<xpu> *s,
                              const std::vector<mxnet::TBlob> &inputs,
                              const float threshold,
                              const int num_workers,
@@ -338,26 +339,49 @@ inline void DerequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
   int num_bits = (int) ceil(log2(float(2 * num_workers + 1)));
 
   CHECK_LE(num_bits, 8);
-
-  mxnet::op::mxnet_op::Kernel<derequantize, mshadow::cpu>
+  mxnet::op::mxnet_op::Kernel<derequantize, xpu>
   ::Launch(s,
-           (inputs[1].Size())/block_size,   // number of parallel kernels, one for each block
-           (inputs[1].Size())/block_size,   // number of blocks
+           (inputs[0].Size())/block_size,   // number of parallel kernels, one for each block
+           (inputs[0].Size())/block_size,   // number of blocks
            block_size,               // number of output floats (32bits) to process for each kernel call
            original_size,            // original size
            num_workers,              // num_workers
            num_bits,                 // num_bits
            threshold,
-           inputs[1].dptr<float>(),  // compressed array
-           inputs[0].dptr<float>());   // sum array
+           inputs[1].dptr<float>(),  // original sized array
+           inputs[0].dptr<float>());   // compressed array
 }
 
-  // these gpu functions are defined in gradient_compression.cu
+inline void RequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
+                           const std::vector<mxnet::TBlob> &inputs,
+                           const int num_workers,
+                           const int original_size) {
+  RequantizeKernelLaunch(s, inputs, num_workers, original_size);
+}
+
+inline void DerequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
+                             const std::vector<mxnet::TBlob> &inputs,
+                             const float threshold,
+                             const int num_workers,
+                             const int original_size) {
+  DerequantizeKernelLaunch(s, inputs, threshold, num_workers, original_size);
+}
+
+// these gpu functions are defined in gradient_compression.cu
 void Quantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
                       const float threshold);
 void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
                         const float threshold);
-
+void Dequantize2BitForSumImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs);
+void RequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
+                    const std::vector<mxnet::TBlob> &inputs,
+                    const int num_workers,
+                    const int original_size);
+void DerequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
+                      const std::vector<mxnet::TBlob> &inputs,
+                      const float threshold,
+                      const int num_workers,
+                      const int original_size);
 
 
 }  // namespace kvstore
