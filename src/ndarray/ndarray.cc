@@ -513,6 +513,10 @@ void CopyFromTo(const NDArray& from, const NDArray& to, int priority) {
     // skip to copy to itself
     return;
   }
+
+  if (from.shape() != to.shape()) {
+    std::cout<<"oops"<<std::endl;
+  }
   CHECK(from.shape() == to.shape())
       << "operands shape mismatch"
       << "from.shape = " << from.shape() << " to.shape=" << to.shape();

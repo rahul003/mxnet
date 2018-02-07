@@ -8,7 +8,7 @@ endif()
 include(cmake/Utils.cmake)
 
 #Some things have order. This must be put in front alone
-mxnet_option(USE_CUDA             "Build with CUDA support"   ON)
+mxnet_option(USE_CUDA             "Build with CUDA support"   OFF)
 mxnet_option(USE_OLDCMAKECUDA           "Build with old cmake cuda" OFF)
 if(USE_CUDA)
   add_definitions(-DMSHADOW_USE_CUDA=1)
@@ -29,8 +29,8 @@ endif()
 
 
 mxnet_option(USE_OPENCV           "Build with OpenCV support" ON)
-mxnet_option(USE_OPENMP           "Build with Openmp support" ON)
-mxnet_option(USE_CUDNN            "Build with cudnn support"  ON) # one could set CUDNN_ROOT for search path
+mxnet_option(USE_OPENMP           "Build with Openmp support" OFF)
+mxnet_option(USE_CUDNN            "Build with cudnn support"  OFF) # one could set CUDNN_ROOT for search path
 mxnet_option(USE_LAPACK           "Build with lapack support" ON IF NOT MSVC)
 mxnet_option(USE_MKL_IF_AVAILABLE "Use MKL if found" ON)
 mxnet_option(USE_MKLML_MKL        "Use MKLML variant of MKL (if MKL found)" ON IF USE_MKL_IF_AVAILABLE AND UNIX AND (NOT APPLE))

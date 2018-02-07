@@ -398,7 +398,7 @@ class KVStoreDistServer {
                               const ps::KVPairs<real_t> &req_data,
                               ps::KVServer<real_t>* server, std::string type) {
     ps::KVPairs<real_t> response;
-    CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first";
+    CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first; type is "<<type;
     auto len = stored.shape().Size();
     response.keys = req_data.keys;
     response.lens = {len};
