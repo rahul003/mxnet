@@ -107,7 +107,7 @@ enum class CommandType {
 };
 
 enum class DataHandleType {
-  kDefaultPushPull, kCompressedPushPull, kRowSparsePushPull
+  kDefaultPushPull, kCompressedPushPull, kRowSparsePushPull, kCompressedInit
 };
 
 class KVStoreDistServer {
@@ -180,7 +180,8 @@ class KVStoreDistServer {
     DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
     if (recved_type == DataHandleType::kRowSparsePushPull) {
       DataHandleRowSparse(req_meta, req_data, server);
-    } else if (recved_type == DataHandleType::kCompressedPushPull) {
+    } else if (recved_type == DataHandleType::kCompressedPushPull ||
+               recved_type == DataHandleType::kCompressedInit ) {
       DataHandleCompressed(req_meta, req_data, server);
     } else {
       DataHandleDefault(req_meta, req_data, server);
@@ -221,8 +222,10 @@ class KVStoreDistServer {
         server->Response(req);
       }
       merged->request.clear();
+      merged->requantized.WaitToRead();
+    } else {
+      merged->int_array.WaitToRead();
     }
-    merged->requantized.WaitToRead();
   }
 
   void DecodeRowIds(const ps::SArray<ps::Key> &keys, int64_t *indices,
@@ -393,9 +396,9 @@ class KVStoreDistServer {
   void DefaultStorageResponse(int key, const NDArray& stored,
                               const ps::KVMeta& req_meta,
                               const ps::KVPairs<real_t> &req_data,
-                              ps::KVServer<real_t>* server) {
+                              ps::KVServer<real_t>* server, std::string type) {
     ps::KVPairs<real_t> response;
-    CHECK(!stored.is_none()) << "init " << key << " first";
+    CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first";
     auto len = stored.shape().Size();
     response.keys = req_data.keys;
     response.lens = {len};
@@ -407,11 +410,7 @@ class KVStoreDistServer {
   void DataHandleCompressed(const ps::KVMeta& req_meta,
                             const ps::KVPairs<real_t> &req_data,
                             ps::KVServer<real_t>* server) {
-    std::cout<<ps::MyRank()<< " receiving datahandlecompressed"<<std::endl;
     if (req_meta.push) {
-      // there used several WaitToRead, this is because \a recved's memory
-      // could be deallocated when this function returns. so we need to make sure
-      // the operators with \a NDArray are actually finished
 
       // first for dummy key which represents original size of array, whose len is 0
       CHECK_EQ(req_data.keys.size(), (size_t)2);
@@ -420,27 +419,16 @@ class KVStoreDistServer {
 
       int original_size = DecodeKey(req_data.keys[0]);
       int key = DecodeKey(req_data.keys[1]);
-//      auto& stored = store_[key];
+
+//      std::cout<<ps::MyRank()<< " receiving datahandlecompressed push for key "<<key<<std::endl;
 
       size_t ds[] = {(size_t)req_data.lens[1]};
       TShape dshape(ds, ds + 1);
       TBlob recv_blob((real_t*) req_data.vals.data(), // NOLINT(*)
                       dshape, cpu::kDevMask);
       NDArray recved = NDArray(recv_blob, 0);
-
-//      NDArray decomp_buf = decomp_buf_[key];
       dshape = TShape{(int64_t) original_size};
 
-//      if (decomp_buf.is_none()) {
-//        decomp_buf = NDArray(dshape, Context());
-//      }
-//      if (stored.is_none()) {
-//        stored = NDArray(dshape, Context());
-//        stored = 0;
-//        gradient_compression_->Dequantize(recved, &stored, 0);
-//        server->Response(req_meta);
-//        stored.WaitToRead();
-//      } else
       if (sync_mode_) {
         // synced push
         auto& merged = merge_buf_[key];
@@ -450,6 +438,7 @@ class KVStoreDistServer {
           TShape requant_shape = TShape{gradient_compression_->
                                         GetRecompressedSize(ps::NumWorkers(), (int64_t) original_size)};
           merged.requantized = NDArray(requant_shape, Context());
+          std::cout<<ps::MyRank()<<" created requantized for key"<<key<<std::endl;
         }
         gradient_compression_->DequantizeForSum(recved, &merged.int_array, 0);
         merged.request.push_back(req_meta);
@@ -470,21 +459,23 @@ class KVStoreDistServer {
       CHECK_EQ(req_data.keys.size(), (size_t)1);
       CHECK_EQ(req_data.lens.size(), (size_t)0);
       int key = DecodeKey(req_data.keys[0]);
-
-      if (!merge_buf_[key].requantized.is_none()) {
-        DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server);  
+      std::cout<<ps::MyRank()<< " receiving datahandlecompressed pull for key "<<key<< " of type "<<req_meta.cmd<<std::endl;
+      DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
+      if (recved_type == DataHandleType::kCompressedPushPull) {
+        std::string s = "requantized array";
+        DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server, s);
+      } else if (recved_type == DataHandleType::kCompressedInit) {
+        std::string s = "store_";
+        DefaultStorageResponse(key, store_[key], req_meta, req_data, server, s);
       } else {
-        CHECK_EQ(1,0);
-        DefaultStorageResponse(key, store_[key], req_meta, req_data, server);  
+        LOG(FATAL) << "Unexpected command to server "<<req_meta.cmd;
       }
-      
     }
   }
 
   void DataHandleDefault(const ps::KVMeta& req_meta,
                          const ps::KVPairs<real_t> &req_data,
                          ps::KVServer<real_t>* server) {
-    std::cout<<ps::MyRank()<< " receiving datahandledefault"<<std::endl;
     CHECK_EQ(req_meta.cmd, static_cast<int>(DataHandleType::kDefaultPushPull));
     // do some check
     CHECK_EQ(req_data.keys.size(), (size_t)1);
@@ -495,6 +486,7 @@ class KVStoreDistServer {
 
     int key = DecodeKey(req_data.keys[0]);
     auto& stored = store_[key];
+    std::cout<<ps::MyRank()<< " receiving datahandledefault for key "<<key<<std::endl;
 
     // there used several WaitToRead, this is because \a recved's memory
     // could be deallocated when this function returns. so we need to make sure
@@ -567,6 +559,7 @@ class KVStoreDistServer {
    * \brief decomp_buf_ is a buffer into which compressed values are
    * decompressed before merging to the store. used when compress_!='none'
    */
+  std::unordered_map<int, NDArray> decomp_buf_;
 
   Executor exec_;
   ps::KVServer<float>* ps_server_;

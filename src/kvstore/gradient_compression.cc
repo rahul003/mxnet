@@ -132,11 +132,12 @@ int GradientCompression::GetRequantizeBlockSize(const int num_workers) {
 int64_t GradientCompression::GetRequantizeOriginalSize(const int num_workers, const int64_t compr_size) {
   int num_bits = GetRequantizeNumBits(num_workers);
   CHECK_EQ(compr_size % num_bits, 0);
-  return compr_size / num_bits;
+  std::cout<<" num_bits: "<<num_bits<<std::endl;
+  return (compr_size / num_bits) * 32;
 }
 
 int GradientCompression::GetRequantizeNumBits(const int num_workers) {
-  return (int) ceil(log2(float(2 * num_workers + 1)));
+  return (int) ceil(log2((2 * num_workers + 1)));
 }
 
 void GradientCompression::Quantize(const mxnet::NDArray &from, mxnet::NDArray *to,
@@ -182,6 +183,8 @@ void GradientCompression::Dequantize(const mxnet::NDArray &from, mxnet::NDArray 
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
   const int a = from.ctx().dev_mask();
   const int b = to->ctx().dev_mask();
+  std::cout<<"dequantize ab "<<a<<b<<std::endl;
+  std::cout<<"cpu is "<<mshadow::cpu::kDevMask<<std::endl;
   const float threshold = threshold_;
   if (type_ == CompressionType::kTwoBit) {
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
@@ -219,6 +222,7 @@ void GradientCompression::Derequantize(const int num_workers, const int original
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
   const int a = from.ctx().dev_mask();
   const int b = to->ctx().dev_mask();
+  std::cout<<"derequantize ab "<<a<<b<<std::endl;
   const float threshold = threshold_;
   if (type_ == CompressionType::kTwoBit) {
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
@@ -229,10 +233,25 @@ void GradientCompression::Derequantize(const int num_workers, const int original
                                      }, from.ctx(), {from.var()}, {to->var()},
                                      mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DerequantizeCPU"));
     } else {
-      LOG(FATAL) << "This operation is only for CPU";
+#if MXNET_USE_CUDA
+      if (a == mshadow::gpu::kDevMask && b == mshadow::gpu::kDevMask) {
+        mxnet::Engine::Get()->PushSync([from, to, threshold, num_workers, original_size](mxnet::RunContext ctx) {
+          std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
+          DerequantizeImpl(ctx.get_stream<mshadow::gpu>(), inputs, threshold,
+                           num_workers, original_size);
+          // Wait GPU kernel to complete
+          ctx.get_stream<mshadow::gpu>()->Wait();
+        }, from.ctx(), {from.var()}, {to->var()},
+        mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DerequantizeGPU"));
+      } else {
+        LOG(FATAL) << "unknown device mask";
+      }
+#else
+      LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
+#endif
     }
   } else {
-    LOG(FATAL) << "Unsupported dequantization of type " << get_type_str();
+    LOG(FATAL) << "Unsupported derequantization of type " << get_type_str();
   }
 }
 
@@ -242,6 +261,7 @@ void GradientCompression::DequantizeForSum(const mxnet::NDArray &from, mxnet::ND
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
   const int a = from.ctx().dev_mask();
   const int b = to->ctx().dev_mask();
+  std::cout<<"dequantize for sum ab "<<a<<b<<std::endl;
   if (type_ == CompressionType::kTwoBit) {
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
       mxnet::Engine::Get()->PushSync([from, to](mxnet::RunContext ctx) {
@@ -250,7 +270,21 @@ void GradientCompression::DequantizeForSum(const mxnet::NDArray &from, mxnet::ND
        }, from.ctx(), {from.var()}, {to->var()},
        mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DequantizeForSumCPU"));
     } else {
-      LOG(FATAL) << "DequantizeForSum can only work on CPU"; 
+      #if MXNET_USE_CUDA
+      if (a == mshadow::gpu::kDevMask && b == mshadow::gpu::kDevMask) {
+        mxnet::Engine::Get()->PushSync([from, to](mxnet::RunContext ctx) {
+          std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
+          Dequantize2BitForSumImpl(ctx.get_stream<mshadow::gpu>(), inputs);
+          // Wait GPU kernel to complete
+          ctx.get_stream<mshadow::gpu>()->Wait();
+        }, from.ctx(), {from.var()}, {to->var()},
+        mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DequantizeForSumGPU"));
+      } else {
+        LOG(FATAL) << "unknown device mask";
+      }
+      #else
+      LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
+      #endif
     }
   } else {
     LOG(FATAL) << "Unsupported dequantization of type " << get_type_str();
@@ -262,14 +296,35 @@ void GradientCompression::Requantize(const int num_workers, const int original_s
                                      const int priority) {
   CHECK(from.shape().ndim() != 0) << "source operands has zero dimension shape";
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
+  const int a = from.ctx().dev_mask();
+  const int b = to->ctx().dev_mask();
+  std::cout<<"requantize for sum ab "<<a<<b<<std::endl;
   if (type_ == CompressionType::kTwoBit) {
+    if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
       mxnet::Engine::Get()->PushSync([from, to, num_workers, original_size](mxnet::RunContext ctx) {
                                        std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
                                        RequantizeImpl(ctx.get_stream<mshadow::cpu>(),
                                                       inputs, num_workers, original_size);
                                      }, from.ctx(), {from.var()}, {to->var()},
                                      mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("RequantizeCPU"));
-
+    } else {
+      #if MXNET_USE_CUDA
+      if (a == mshadow::gpu::kDevMask && b == mshadow::gpu::kDevMask) {
+        mxnet::Engine::Get()->PushSync([from, to, num_workers, original_size](mxnet::RunContext ctx) {
+          std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
+          RequantizeImpl(ctx.get_stream<mshadow::gpu>(), inputs,
+                         num_workers, original_size);
+          // Wait GPU kernel to complete
+          ctx.get_stream<mshadow::gpu>()->Wait();
+        }, from.ctx(), {from.var()}, {to->var()},
+        mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("RequantizeGPU"));
+      } else {
+        LOG(FATAL) << "unknown device mask";
+      }
+      #else
+      LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
+      #endif
+    }
   } else {
     LOG(FATAL) << "Unsupported requantization of type " << get_type_str();
   }
