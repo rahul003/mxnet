@@ -396,9 +396,9 @@ class KVStoreDistServer {
   void DefaultStorageResponse(int key, const NDArray& stored,
                               const ps::KVMeta& req_meta,
                               const ps::KVPairs<real_t> &req_data,
-                              ps::KVServer<real_t>* server, std::string type) {
+                              ps::KVServer<real_t>* server) {
     ps::KVPairs<real_t> response;
-    CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first; type is "<<type;
+    CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first";
     auto len = stored.shape().Size();
     response.keys = req_data.keys;
     response.lens = {len};
@@ -462,11 +462,12 @@ class KVStoreDistServer {
       std::cout<<ps::MyRank()<< " receiving datahandlecompressed pull for key "<<key<< " of type "<<req_meta.cmd<<std::endl;
       DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
       if (recved_type == DataHandleType::kCompressedPushPull) {
-        std::string s = "requantized array";
-        DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server, s);
+        std::cout<<ps::MyRank()<<": sending response for requantized array of key"<<key<<std::endl;
+        DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server);
       } else if (recved_type == DataHandleType::kCompressedInit) {
         std::string s = "store_";
-        DefaultStorageResponse(key, store_[key], req_meta, req_data, server, s);
+	std::cout<<ps::MyRank()<<": sending response for store of key "<<key<<std::endl;
+        DefaultStorageResponse(key, store_[key], req_meta, req_data, server);
       } else {
         LOG(FATAL) << "Unexpected command to server "<<req_meta.cmd;
       }
