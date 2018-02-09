@@ -362,16 +362,17 @@ class KVStoreDist : public KVStoreLocal {
           // issue pull
           CHECK_NOTNULL(ps_worker_)->ZPull(
           pskv.keys, vals, &pskv.lens, cmd, [vals, cb]() { delete vals; cb(); });
+//          std::cout << "executed compressed pull of type " << cmd << std::endl;
+
         };
         CHECK_NOTNULL(Engine::Get())->PushAsync(
         pull_from_servers,
         pinned_ctx_,
-        {send_buf.var()},
-        {recv_compr_buf.var(), recv_buf.var()},
+        {},
+        {send_buf.var(), recv_compr_buf.var(), recv_buf.var()}, //send_buf is taken as write dep so that push doesn't go first
         FnProperty::kNormal,
         priority,
         PROFILER_MESSAGE("KVStoreDistDefaultStoragePullCompressed"));
-
         NDArray& stored = store_[key];
         if (pull_done) {
           CHECK(!stored.is_none()) << ps::MyRank() << " stored is none";
@@ -496,10 +497,10 @@ class KVStoreDist : public KVStoreLocal {
           // we want inactive gc to send uncompressed gradients,
           // but sharded in the same way as later pushes would when gc becomes active
           if (is_active) {
-            std::cout<<ps::MyRank()<<" pushing compressed key :"<<key<<std::endl;
+//            std::cout<<" pushing compressed key :"<<key<<std::endl;
             PushCompressed(key, comm_buf, pskv, priority);
           } else {
-            std::cout<<ps::MyRank()<<" pushing compressed key as default key to init :"<<key<<std::endl;
+//            std::cout<<" pushing compressed key as default key to init :"<<key<<std::endl;
             PushDefault(key, comm_buf, pskv, priority);
           }
         }
@@ -538,6 +539,7 @@ class KVStoreDist : public KVStoreLocal {
         CHECK_NOTNULL(ps_worker_)->ZPush(
           pskv.keys, vals, pskv.lens,
           static_cast<int>(DataHandleType::kCompressedPushPull), [cb]() { cb(); });
+//        std::cout << "executed compressed push" << std::endl;
       };
     // acquire locks on both comm_buf and small_buf so that
     // pull (which uses comm_buf) for the same key waits till push finishes
@@ -772,13 +774,14 @@ class KVStoreDist : public KVStoreLocal {
         // partition it to all servers
         push_pskv.size = 0;
         pull_pskv.size = 0;
-
+        size_t num_bits = gradient_compression_->GetRequantizeNumBits(num_workers);
         for (int i = 0; i < num_servers; ++i) {
           size_t push_part, part_orig, pull_part, part_blocks;
           if (i == num_servers-1) {
             pull_part = pull_compr_size - pull_pskv.size;
             push_part = compr_size - push_pskv.size;
-            part_orig = gradient_compression_->GetRequantizeOriginalSize(num_workers, pull_part);
+            part_orig = pull_part * 32 / num_bits;
+            CHECK_EQ((pull_part * 32) % num_bits, 0);
 //            std::cout<<"pull_part: "<<pull_part<<"; push_part "<<push_part<<" ; part_orig "<<part_orig<<std::endl;
           } else {
 //            std::cout<<"num_vblocks: "<<num_blocks<<" ; ";
@@ -786,7 +789,8 @@ class KVStoreDist : public KVStoreLocal {
                           static_cast<size_t> (round(static_cast<double>(num_blocks)/num_servers*(i)));
             pull_part = part_blocks * block_size;
 //            std::cout<<"part_blocks: "<<part_blocks<< ";";
-            part_orig = gradient_compression_->GetRequantizeOriginalSize(num_workers, pull_part);
+            part_orig = pull_part * 32 / num_bits;
+            CHECK_EQ((pull_part * 32) % num_bits, 0);
             push_part = gradient_compression_->GetCompressedSize(part_orig);
 //            std::cout<<"pull_part: "<<pull_part<<"; push_part "<<push_part<<" ; part_orig "<<part_orig << std::endl;
           }

@@ -129,13 +129,6 @@ int GradientCompression::GetRequantizeBlockSize(const int num_workers) {
   return lcm(num_workers, 32) / 32;
 }
 
-int64_t GradientCompression::GetRequantizeOriginalSize(const int num_workers, const int64_t compr_size) {
-  int num_bits = GetRequantizeNumBits(num_workers);
-  CHECK_EQ(compr_size % num_bits, 0);
-  std::cout<<" num_bits: "<<num_bits<<std::endl;
-  return (compr_size / num_bits) * 32;
-}
-
 int GradientCompression::GetRequantizeNumBits(const int num_workers) {
   return (int) ceil(log2((2 * num_workers + 1)));
 }
@@ -183,8 +176,6 @@ void GradientCompression::Dequantize(const mxnet::NDArray &from, mxnet::NDArray 
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
   const int a = from.ctx().dev_mask();
   const int b = to->ctx().dev_mask();
-  std::cout<<"dequantize ab "<<a<<b<<std::endl;
-  std::cout<<"cpu is "<<mshadow::cpu::kDevMask<<std::endl;
   const float threshold = threshold_;
   if (type_ == CompressionType::kTwoBit) {
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
@@ -222,7 +213,6 @@ void GradientCompression::Derequantize(const int num_workers, const int original
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
   const int a = from.ctx().dev_mask();
   const int b = to->ctx().dev_mask();
-  std::cout<<"derequantize ab "<<a<<b<<std::endl;
   const float threshold = threshold_;
   if (type_ == CompressionType::kTwoBit) {
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
@@ -261,7 +251,6 @@ void GradientCompression::DequantizeForSum(const mxnet::NDArray &from, mxnet::ND
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
   const int a = from.ctx().dev_mask();
   const int b = to->ctx().dev_mask();
-  std::cout<<"dequantize for sum ab "<<a<<b<<std::endl;
   if (type_ == CompressionType::kTwoBit) {
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
       mxnet::Engine::Get()->PushSync([from, to](mxnet::RunContext ctx) {
@@ -298,7 +287,6 @@ void GradientCompression::Requantize(const int num_workers, const int original_s
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
   const int a = from.ctx().dev_mask();
   const int b = to->ctx().dev_mask();
-  std::cout<<"requantize for sum ab "<<a<<b<<std::endl;
   if (type_ == CompressionType::kTwoBit) {
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
       mxnet::Engine::Get()->PushSync([from, to, num_workers, original_size](mxnet::RunContext ctx) {

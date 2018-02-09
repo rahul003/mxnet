@@ -116,7 +116,6 @@ class GradientCompression {
 
   int GetRequantizeBlockSize(const int num_workers);
   int GetRequantizeNumBits(const int num_workers);
-  int64_t GetRequantizeOriginalSize(const int num_workers, const int64_t compr_size);
 
     /*!
      * returns recompressed size after merging partially dequantized gradients from each worker

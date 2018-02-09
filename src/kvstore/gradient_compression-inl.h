@@ -224,7 +224,7 @@ struct requantize {
 
       // this will be incremented four times to cover the full float
       unsigned char *byte_ptr = reinterpret_cast < unsigned char * > (compr_float);
-      while ((end_pos != block_size * 32) &&
+      while ((end_pos < block_size * 32) &&
              (!is_last || (is_last && num_prev_elems < original_size ))) {
         uint8_t s = (uint8_t) *(sum++);
         num_prev_elems++;
@@ -272,7 +272,7 @@ struct derequantize {
     uint8_t bitmask = (0x01 << num_bits) - 1;
     for (int i = 0; i < block_size; i++, compr_float++) {
       unsigned char *byte_ptr = reinterpret_cast < unsigned char * > (compr_float);
-      while ((end_pos != block_size * 32) &&
+      while ((end_pos < block_size * 32) &&
              (!is_last || (is_last && num_prev_elems < original_size ))) {
         if (end_pos / 8 == st_pos / 8) {
           int curval = *byte_ptr;
@@ -307,6 +307,7 @@ inline void RequantizeKernelLaunch(mshadow::Stream<xpu> *s,
                            const int num_workers,
                            const int original_size) {
   int block_size = lcm(num_workers, 32) / 32;
+  // each block is responsible for block_size number of floats into which compressed data is packed
 
   // number of bits used for each value
   int num_bits = (int) ceil(log2(float(2 * num_workers + 1)));
