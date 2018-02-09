@@ -210,6 +210,7 @@ class KVStoreDistServer {
       }
       merged->request.clear();
       stored->WaitToRead();
+//      std::cout<<ps::MyRank()<< " finished default push for key " << key << std::endl;
     } else {
       merged->array.WaitToRead();
     }
@@ -223,6 +224,7 @@ class KVStoreDistServer {
       }
       merged->request.clear();
       merged->requantized.WaitToRead();
+//      std::cout<<ps::MyRank()<< " finished default push for key " << key << std::endl;
     } else {
       merged->int_array.WaitToRead();
     }
@@ -397,21 +399,23 @@ class KVStoreDistServer {
                               const ps::KVMeta& req_meta,
                               const ps::KVPairs<real_t> &req_data,
                               ps::KVServer<real_t>* server) {
-    ps::KVPairs<real_t> response;
-    CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first";
-    auto len = stored.shape().Size();
-    response.keys = req_data.keys;
-    response.lens = {len};
-    // TODO(mli) try to remove this CopyFrom
-    response.vals.CopyFrom(static_cast<const float*>(stored.data().dptr_), len);
-    server->Response(req_meta, response);
+    mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server](mxnet::RunContext ctx) {
+       ps::KVPairs<real_t> response;
+       CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first";
+       auto len = stored.shape().Size();
+       response.keys = req_data.keys;
+       response.lens = {len};
+       // TODO(mli) try to remove this CopyFrom
+       response.vals.CopyFrom(static_cast<const float*>(stored.data().dptr_), len);
+       server->Response(req_meta, response);
+     }, stored.ctx(), {stored.var()}, {},
+     mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("DefaultStorageResponse"));
   }
 
   void DataHandleCompressed(const ps::KVMeta& req_meta,
                             const ps::KVPairs<real_t> &req_data,
                             ps::KVServer<real_t>* server) {
     if (req_meta.push) {
-
       // first for dummy key which represents original size of array, whose len is 0
       CHECK_EQ(req_data.keys.size(), (size_t)2);
       CHECK_EQ(req_data.lens.size(), (size_t)2);
@@ -419,9 +423,8 @@ class KVStoreDistServer {
 
       int original_size = DecodeKey(req_data.keys[0]);
       int key = DecodeKey(req_data.keys[1]);
-
+//      std::cout<<ps::MyRank()<<" received compressed request for push of key "<<std::endl;
 //      std::cout<<ps::MyRank()<< " receiving datahandlecompressed push for key "<<key<<std::endl;
-
       size_t ds[] = {(size_t)req_data.lens[1]};
       TShape dshape(ds, ds + 1);
       TBlob recv_blob((real_t*) req_data.vals.data(), // NOLINT(*)
@@ -438,7 +441,7 @@ class KVStoreDistServer {
           TShape requant_shape = TShape{gradient_compression_->
                                         GetRecompressedSize(ps::NumWorkers(), (int64_t) original_size)};
           merged.requantized = NDArray(requant_shape, Context());
-          std::cout<<ps::MyRank()<<" created requantized for key"<<key<<std::endl;
+//          std::cout<<ps::MyRank()<<" created requantized for key"<<key<<std::endl;
         }
         gradient_compression_->DequantizeForSum(recved, &merged.int_array, 0);
         merged.request.push_back(req_meta);
@@ -459,20 +462,21 @@ class KVStoreDistServer {
       CHECK_EQ(req_data.keys.size(), (size_t)1);
       CHECK_EQ(req_data.lens.size(), (size_t)0);
       int key = DecodeKey(req_data.keys[0]);
-      std::cout<<ps::MyRank()<< " receiving datahandlecompressed pull for key "<<key<< " of type "<<req_meta.cmd<<std::endl;
+//      std::cout<<ps::MyRank()<< " receiving datahandle compressed pull for key "<<key<< " of type "<<req_meta.cmd<<std::endl;
       DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
       if (recved_type == DataHandleType::kCompressedPushPull) {
-        std::cout<<ps::MyRank()<<": sending response for requantized array of key"<<key<<std::endl;
+//        std::cout<<ps::MyRank()<<": sending response for requantized array of key"<<key<<std::endl;
         DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server);
       } else if (recved_type == DataHandleType::kCompressedInit) {
-        std::string s = "store_";
-	std::cout<<ps::MyRank()<<": sending response for store of key "<<key<<std::endl;
+//	      std::cout<<ps::MyRank()<<": sending response for store of key "<<key<<std::endl;
         DefaultStorageResponse(key, store_[key], req_meta, req_data, server);
       } else {
         LOG(FATAL) << "Unexpected command to server "<<req_meta.cmd;
       }
     }
   }
+
+
 
   void DataHandleDefault(const ps::KVMeta& req_meta,
                          const ps::KVPairs<real_t> &req_data,
@@ -487,8 +491,6 @@ class KVStoreDistServer {
 
     int key = DecodeKey(req_data.keys[0]);
     auto& stored = store_[key];
-    std::cout<<ps::MyRank()<< " receiving datahandledefault for key "<<key<<std::endl;
-
     // there used several WaitToRead, this is because \a recved's memory
     // could be deallocated when this function returns. so we need to make sure
     // the operators with \a NDArray are actually finished
@@ -527,6 +529,7 @@ class KVStoreDistServer {
         stored.WaitToRead();
       }
     } else {
+//      std::cout<<ps::MyRank()<< " receiving datahandledefault pull for key "<<key<<std::endl;
       DefaultStorageResponse(key, stored, req_meta, req_data, server);
     }
   }
