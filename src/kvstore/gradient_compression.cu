@@ -58,5 +58,14 @@ void DerequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
 }
 
 
+void QuantizeSignumImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& inputs,
+                      const float beta) {
+  QuantizeSignumKernelLaunch(s, inputs, beta);
+}
+
+void DequantizeSignumImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& inputs) {
+  DequantizeSignumKernelLaunch(s, inputs);
+}
+
 }  // namespace kvstore
 }  // namespace mxnet
