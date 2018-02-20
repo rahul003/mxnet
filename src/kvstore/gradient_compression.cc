@@ -279,7 +279,7 @@ void GradientCompression::Dequantize(const mxnet::NDArray &from,
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
       mxnet::Engine::Get()->PushSync([from, to, threshold](mxnet::RunContext ctx) {
         std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
-        Dequantize2BitImpl(ctx.get_stream<mshadow::cpu>(), inputs, threshold);
+        Dequantize2BitImpl(ctx.get_stream<mshadow::cpu>(), inputs, &threshold);
       }, from.ctx(), {from.var()}, {to->var()},
       mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DequantizeCPU"));
     } else {
@@ -287,7 +287,7 @@ void GradientCompression::Dequantize(const mxnet::NDArray &from,
       if (a == mshadow::gpu::kDevMask && b == mshadow::gpu::kDevMask) {
         mxnet::Engine::Get()->PushSync([from, to, threshold](mxnet::RunContext ctx) {
           std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
-          Dequantize2BitImpl(ctx.get_stream<mshadow::gpu>(), inputs, threshold);
+          Dequantize2BitImpl(ctx.get_stream<mshadow::gpu>(), inputs, &threshold);
           // Wait GPU kernel to complete
           ctx.get_stream<mshadow::gpu>()->Wait();
         }, from.ctx(), {from.var()}, {to->var()},
