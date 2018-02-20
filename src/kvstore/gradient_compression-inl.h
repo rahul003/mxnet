@@ -157,21 +157,23 @@ struct dequantize_signum {
   }
 };
 
-template<typename xpu, typename DType>
+template<typename xpu>
 void DequantizeSignumKernelLaunch(mshadow::Stream<xpu> *s,
-                  const std::vector<mxnet::TBlob> &inputs, const DType to_remove) { // TODO remove hack
-  mxnet::op::mxnet_op::Kernel<dequantize_signum, xpu>
-  ::Launch(s,
-          inputs[1].Size(),         // original size
-          inputs[1].dptr<DType>(),  // out array
-          inputs[0].dptr<float>());  // compressed array
+                                  const std::vector<mxnet::TBlob> &inputs) { // TODO remove hack
+  MSHADOW_TYPE_SWITCH(inputs[1].type_flag_, DType, {
+    mxnet::op::mxnet_op::Kernel<dequantize_signum, xpu>
+    ::Launch(s,
+             inputs[1].Size(),         // original size
+             inputs[1].dptr<DType>(),  // out array
+             inputs[0].dptr<float>());  // compressed array
+  });
 }
 
 struct dequantize_2bit {
-  template<typename DType>
+  template<typename DType, typename FType>
   MSHADOW_XINLINE static void Map(int i,
                                   DType *out,
-                                  float *in,
+                                  FType *in,
                                   const DType neg_threshold,
                                   const DType pos_threshold) {
     // get position of dequantized value to fill
@@ -200,16 +202,20 @@ struct dequantize_2bit {
   }
 };
 
-template<typename xpu, typename DType>
-void Dequantize2BitKernelLaunch(mshadow::Stream<xpu> *s, const std::vector<mxnet::TBlob> &inputs,
-                                const DType threshold) {
-  mxnet::op::mxnet_op::Kernel<dequantize_2bit, xpu>
-  ::Launch(s,
-          inputs[1].Size(),         // original size
-          inputs[1].dptr<DType>(),      // out array
-          inputs[0].dptr<float>(),  // compressed array
-          -1 * threshold,           // negative threshold
-          threshold);               // positive threshold
+template<typename xpu>
+void Dequantize2BitKernelLaunch(mshadow::Stream<xpu> *s,
+                                const std::vector<mxnet::TBlob> &inputs,
+                                const void *threshold) {
+  MSHADOW_TYPE_SWITCH(inputs[1].type_flag_, DType, {
+    const DType th = *static_cast<const DType *>(threshold);
+    mxnet::op::mxnet_op::Kernel<dequantize_2bit, xpu>
+    ::Launch(s,
+             inputs[1].Size(),         // original size
+             inputs[1].dptr<DType>(),      // out array
+             inputs[0].dptr<float>(),  // compressed array
+             static_cast<DType>(th * -1), // negative threshold
+             th);               // positive threshold
+  });
 }
 
 struct quantize_logk {
@@ -384,9 +390,8 @@ void QuantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxne
 void QuantizeLogKImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
                         const int num_workers);
 
-template <typename DType>
 void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
-                        const DType threshold);
+                        const void* threshold);
 
 void DequantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s,
                           const std::vector<mxnet::TBlob> &inputs);
@@ -412,23 +417,16 @@ inline void QuantizeLogKImpl(mshadow::Stream<mshadow::cpu> *s,
   QuantizeLogKKernelLaunch(s, inputs, num_workers, inputs[0].Size());
 }
 
-template <typename DType>
 inline void Dequantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
                                const std::vector<mxnet::TBlob> &inputs,
-                               const DType threshold) {
+                               const void *threshold) {
   Dequantize2BitKernelLaunch(s, inputs, threshold);
 }
 
 
 inline void DequantizeSignumImpl(mshadow::Stream<mshadow::cpu> *s,
                                  const std::vector<mxnet::TBlob> &inputs) {
-  if (inputs[1].type_flag_ == mshadow::kFloat32) {
-    DequantizeSignumKernelLaunch(s, inputs, (float) 1.0);
-  } else if (inputs[1].type_flag_ == mshadow::kInt32) {
-    DequantizeSignumKernelLaunch(s, inputs, (int) 1);
-  } else {
-    LOG(FATAL) << "Unhandled type";
-  }
+    DequantizeSignumKernelLaunch(s, inputs);
 }
 
 inline void DequantizeLogKImpl(mshadow::Stream<mshadow::cpu> *s,

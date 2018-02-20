@@ -47,23 +47,28 @@ void QuantizeLogKImpl(mshadow::Stream<mshadow::gpu> *s,
   QuantizeLogKKernelLaunch(s, inputs, num_workers, inputs[0].Size());
 }
 
-template <typename DType>
 void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s,
                         const std::vector<mxnet::TBlob> &inputs,
-                        const DType threshold) {
+                        const void *threshold) {
   Dequantize2BitKernelLaunch(s, inputs, threshold);
 }
 
 void DequantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s,
                           const std::vector<mxnet::TBlob> &inputs) {
-  if (inputs[1].type_flag_ == mshadow::kFloat32) {
-    DequantizeSignumKernelLaunch(s, inputs, (float) 1.0);
-  } else if (inputs[1].type_flag_ == mshadow::kInt32) {
-    DequantizeSignumKernelLaunch(s, inputs, (int) 1);
-  } else {
-    LOG(FATAL) << "Unhandled type";
-  }
+    DequantizeSignumKernelLaunch(s, inputs);
 }
+
+//template<>
+//void DequantizeSignumKernelLaunch<gpu>(mshadow::Stream<xpu> *s,
+//                                       const std::vector<mxnet::TBlob> &inputs,
+//                                       const DType to_remove) { // TODO remove hack
+//  mxnet::op::mxnet_op::Kernel<dequantize_signum, gpu>
+//  ::Launch(s,
+//           inputs[1].Size(),         // original size
+//           inputs[1].dptr<DType>(),  // out array
+//           inputs[0].dptr<float>());  // compressed array
+//}
+
 
 void DequantizeLogKImpl(mshadow::Stream<mshadow::gpu> *s,
                         const std::vector<mxnet::TBlob> &inputs,
