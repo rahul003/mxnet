@@ -36,6 +36,7 @@
 #include "mxnet/kvstore.h"
 #include "../operator/tensor/elemwise_binary_op-inl.h"
 #include "../operator/tensor/init_op.h"
+#include "gradient_compression.h"
 
 namespace mxnet {
 namespace kvstore {
@@ -163,6 +164,7 @@ class KVStoreDistServer {
       sync_mode_ = true;
     } else if (recved_type == CommandType::kSetGradientCompression) {
       gradient_compression_->DecodeParams(recved.body);
+      gradient_compression_->SetNumWorkers(ps::NumWorkers());
     } else {
       // this uses value 0 for message id from frontend
       // let the main thread to execute ctrl, which is necessary for python
@@ -218,7 +220,7 @@ class KVStoreDistServer {
 
   inline void ApplyUpdates2(const int key, MergeBuf *merged, ps::KVServer<real_t>* server, int original_size) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
-      gradient_compression_->Requantize(ps::NumWorkers(), original_size, merged->int_array, &(merged->requantized), 0);
+      gradient_compression_->Quantize(merged->int_array, &(merged->requantized), 0, CompressionType::kLogK);
       for (const auto &req : merged->request) {
         server->Response(req);
       }

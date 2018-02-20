@@ -22,6 +22,7 @@ import ctypes
 import sys
 import pickle
 import logging
+import os
 from .base import _LIB, check_call
 from .kvstore import create
 
@@ -75,11 +76,22 @@ class KVStoreServer(object):
 def _init_kvstore_server_module():
     """Start server/scheduler."""
     is_worker = ctypes.c_int()
+    is_scheduler = ctypes.c_int()
     check_call(_LIB.MXKVStoreIsWorkerNode(ctypes.byref(is_worker)))
+    check_call(_LIB.MXKVStoreIsSchedulerNode(ctypes.byref(is_scheduler)))
+    profile_servers = os.getenv('MXNET_PROFILER_PROFILE_SERVERS', 0)
+    if profile_servers and not is_scheduler:
+        from.profiler import profiler_set_state,dump_profile,profiler_set_config
     if is_worker.value == 0:
         kvstore = create('dist')
         server = KVStoreServer(kvstore)
+        if profile_servers and not is_scheduler:
+            profiler_set_config(mode='all', filename="server" + str(kvstore.rank) + ".json")
+            profiler_set_state('run')
         server.run()
+        if profile_servers and not is_scheduler:
+            profiler_set_state('stop')
+            dump_profile()
         sys.exit()
 
 _init_kvstore_server_module()

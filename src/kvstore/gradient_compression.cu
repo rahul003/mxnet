@@ -27,44 +27,49 @@
 
 namespace mxnet {
 namespace kvstore {
-void Quantize2BitImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& inputs,
+
+
+void Quantize2BitImpl(mshadow::Stream<mshadow::gpu> *s,
+                      const std::vector<mxnet::TBlob> &inputs,
                       const float threshold) {
   Quantize2BitKernelLaunch(s, inputs, threshold);
 }
 
-void Dequantize2BitImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& inputs,
-                        const float threshold) {
-  Dequantize2BitKernelLaunch(s, inputs, threshold);
-}
-
-void Dequantize2BitForSumImpl(mshadow::Stream<mshadow::gpu> *s,
-                                     const std::vector<mxnet::TBlob> &inputs) {
-  Dequantize2BitForSumKernelLaunch(s, inputs);
-}
-
-void RequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
-                           const std::vector<mxnet::TBlob> &inputs,
-                           const int num_workers,
-                           const int original_size) {
-  RequantizeKernelLaunch(s, inputs, num_workers, original_size);
-}
-
-void DerequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
-                             const std::vector<mxnet::TBlob> &inputs,
-                             const float threshold,
-                             const int num_workers,
-                             const int original_size) {
-  DerequantizeKernelLaunch(s, inputs, threshold, num_workers, original_size);
-}
-
-
-void QuantizeSignumImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& inputs,
-                      const float beta) {
+void QuantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s,
+                        const std::vector<mxnet::TBlob> &inputs,
+                        const float beta) {
   QuantizeSignumKernelLaunch(s, inputs, beta);
 }
 
-void DequantizeSignumImpl(mshadow::Stream<gpu>* s, const std::vector<TBlob>& inputs) {
-  DequantizeSignumKernelLaunch(s, inputs);
+void QuantizeLogKImpl(mshadow::Stream<mshadow::gpu> *s,
+                      const std::vector<mxnet::TBlob> &inputs,
+                      const int num_workers) {
+  QuantizeLogKKernelLaunch(s, inputs, num_workers, inputs[0].Size());
+}
+
+template <typename DType>
+void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s,
+                        const std::vector<mxnet::TBlob> &inputs,
+                        const DType threshold) {
+  Dequantize2BitKernelLaunch(s, inputs, threshold);
+}
+
+void DequantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s,
+                          const std::vector<mxnet::TBlob> &inputs) {
+  if (inputs[1].type_flag_ == mshadow::kFloat32) {
+    DequantizeSignumKernelLaunch(s, inputs, (float) 1.0);
+  } else if (inputs[1].type_flag_ == mshadow::kInt32) {
+    DequantizeSignumKernelLaunch(s, inputs, (int) 1);
+  } else {
+    LOG(FATAL) << "Unhandled type";
+  }
+}
+
+void DequantizeLogKImpl(mshadow::Stream<mshadow::gpu> *s,
+                        const std::vector<mxnet::TBlob> &inputs,
+                        const float threshold,
+                        const int num_workers) {
+  DequantizeLogKKernelLaunch(s, inputs, threshold, num_workers, inputs[1].Size());
 }
 
 }  // namespace kvstore

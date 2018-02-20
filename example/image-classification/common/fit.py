@@ -133,6 +133,8 @@ def add_fit_args(parser):
                        help='the epochs to ramp-up lr to scaled large-batch value')
     train.add_argument('--warmup-strategy', type=str, default='linear',
                        help='the ramping-up strategy for large batch sgd')
+    train.add_argument('--profile-worker', type=int, default=0,
+                       help='profile worker')
     return train
 
 
@@ -267,6 +269,10 @@ def fit(args, network, data_loader, **kwargs):
         cbs = kwargs['batch_end_callback']
         batch_end_callbacks += cbs if isinstance(cbs, list) else [cbs]
 
+    if args.profile_worker:
+        mx.profiler.profiler_set_config(mode='all', filename="worker"+str(kv.rank)+".json")
+        mx.profiler.profiler_set_state('run')
+
     # run
     model.fit(train,
               begin_epoch=args.load_epoch if args.load_epoch else 0,
@@ -283,3 +289,8 @@ def fit(args, network, data_loader, **kwargs):
               epoch_end_callback=checkpoint,
               allow_missing=True,
               monitor=monitor)
+
+    if args.profile_worker:
+        mx.profiler.profiler_set_state('stop')
+        mx.profiler.dump_profile()
+

@@ -49,7 +49,7 @@ inline int lcm(int a, int b) {
 }
 
 enum class CompressionType {
-  kNone, kTwoBit, kSignum
+  kNone, kTwoBit, kSignum, kLogK
 };
 
 struct GradientCompressionParam : public dmlc::Parameter<GradientCompressionParam> {
@@ -101,6 +101,8 @@ class GradientCompression {
    */
   void SetSignumCompression(const float beta);
 
+  void SetNumWorkers(const int num_workers);
+
   /*!
    * \brief encodes parameters of gc into a string
    */
@@ -142,7 +144,9 @@ class GradientCompression {
   * \param priority Priority of the action.
   */
   void Quantize(const mxnet::NDArray &from, mxnet::NDArray *to,
-                mxnet::NDArray *residual, const int priority);
+                mxnet::NDArray *residual, const int priority, const CompressionType type);
+  void Quantize(const mxnet::NDArray &from, mxnet::NDArray *to, mxnet::NDArray *residual, const int priority);
+  void Quantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority, const CompressionType type);
 
   /*!
   * \brief Issues dequantize operation to be scheduled by the engine
@@ -151,12 +155,12 @@ class GradientCompression {
   * \param to the target ndarray which contains final dequantized data
   * \param priority Priority of the action.
   */
+  template <typename T>
+  void Dequantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority, const CompressionType type,
+                  const T threshold);
   void Dequantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
-  void Derequantize(const int num_workers, const int original_size,
-                    const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
+  void Dequantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority, const CompressionType type);
   void DequantizeForSum(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
-  void Requantize(const int num_workers, const int original_size,
-                  const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
 
 private:
   /*!
@@ -176,6 +180,11 @@ private:
    * Must be a number between  0 to 1.
    */
   float beta_ = 0;
+
+  /*!
+   * \brief for single machine this is equal to number of gpus, for distributed equal to number of machines
+   */
+  int num_workers_ = 0;
 };
 }  // namespace kvstore
 }  // namespace mxnet

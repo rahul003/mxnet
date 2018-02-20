@@ -28,14 +28,10 @@
 #include <vector>
 #include "../operator/mxnet_op.h"
 #include "gradient_compression.h"
+#include "../../mshadow/mshadow/base.h"
 
 namespace mxnet {
 namespace kvstore {
-
-void QuantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
-                      const float beta);
-void DequantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s,
-                      const std::vector<mxnet::TBlob> &inputs);
 
 struct quantize_2bit {
   MSHADOW_XINLINE static void Map(int out_block_id,
@@ -143,11 +139,12 @@ void QuantizeSignumKernelLaunch(mshadow::Stream<xpu> *s, const std::vector<mxnet
 }
 
 struct dequantize_signum {
+  template <typename DType>
   MSHADOW_XINLINE static void Map(int i,
-                                  float *out,
+                                  DType *out,
                                   float *in) {
     // get position of dequantized value to fill
-    float *outval = out + i;
+    DType *outval = out + i;
     // gets byte which holds quantized value for this position
     unsigned char *ch_ptr = reinterpret_cast<unsigned char *>(in + (i >> 5));
     ch_ptr += ((i & 31) >> 3);
@@ -160,24 +157,25 @@ struct dequantize_signum {
   }
 };
 
-template<typename xpu>
+template<typename xpu, typename DType>
 void DequantizeSignumKernelLaunch(mshadow::Stream<xpu> *s,
-                  const std::vector<mxnet::TBlob> &inputs) {
+                  const std::vector<mxnet::TBlob> &inputs, const DType to_remove) { // TODO remove hack
   mxnet::op::mxnet_op::Kernel<dequantize_signum, xpu>
   ::Launch(s,
           inputs[1].Size(),         // original size
-          inputs[1].dptr<float>(),  // out array
+          inputs[1].dptr<DType>(),  // out array
           inputs[0].dptr<float>());  // compressed array
 }
 
 struct dequantize_2bit {
+  template<typename DType>
   MSHADOW_XINLINE static void Map(int i,
-                                  float *out,
+                                  DType *out,
                                   float *in,
-                                  const float neg_threshold,
-                                  const float pos_threshold) {
+                                  const DType neg_threshold,
+                                  const DType pos_threshold) {
     // get position of dequantized value to fill
-    float *outval = out + i;
+    DType *outval = out + i;
     // gets byte which holds quantized value for this position
     char *ch_ptr = reinterpret_cast<char *>(in + (i >> 4));
     ch_ptr += ((i & 15) >> 2);
@@ -202,76 +200,19 @@ struct dequantize_2bit {
   }
 };
 
-template<typename xpu>
+template<typename xpu, typename DType>
 void Dequantize2BitKernelLaunch(mshadow::Stream<xpu> *s, const std::vector<mxnet::TBlob> &inputs,
-                                const float threshold) {
+                                const DType threshold) {
   mxnet::op::mxnet_op::Kernel<dequantize_2bit, xpu>
   ::Launch(s,
           inputs[1].Size(),         // original size
-          inputs[1].dptr<float>(),  // out array
+          inputs[1].dptr<DType>(),      // out array
           inputs[0].dptr<float>(),  // compressed array
-          -1 *threshold,            // negative threshold
+          -1 * threshold,           // negative threshold
           threshold);               // positive threshold
 }
 
-inline void Quantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
-                             const std::vector<mxnet::TBlob> &inputs,
-                             const float threshold) {
-  Quantize2BitKernelLaunch(s, inputs, threshold);
-}
-
-inline void Dequantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
-                               const std::vector<mxnet::TBlob> &inputs,
-                               const float threshold) {
-  Dequantize2BitKernelLaunch(s, inputs, threshold);
-}
-
-struct half_dequantize_2bit {
-  MSHADOW_XINLINE static void Map(int i,
-                                  int *out,
-                                  float *in) {
-    // get position of dequantized value to fill
-    int *outval = out + i;
-    // gets byte which holds quantized value for this position
-    char *ch_ptr = reinterpret_cast<char *>(in + (i >> 4));
-    ch_ptr += ((i & 15) >> 2);
-    // masks used to quantize data
-    const uint8_t posbits[] = {0xc0, 0x30, 0x0c, 0x03};
-    const uint8_t negbits[] = {0x80, 0x20, 0x08, 0x02};
-    // col denotes which two bits of a byte are set for this value
-    // col=0 implies first two bits, col=3 implies last two bits,...
-    const int col = i & 3;
-    const uint8_t mask = posbits[col];
-    const uint8_t negmask = negbits[col];
-    const uint8_t masked = *ch_ptr & mask;
-    if (masked == mask) {
-      *outval += 2;
-    } else if (masked == negmask) {
-      // use posbits for mask as posbits are both 1s
-      // then compare masked with negbits to see if only negbits were set
-      *outval += 0;
-    } else {
-      *outval += 1;
-    }
-  }
-};
-
-template<typename xpu>
-inline void Dequantize2BitForSumKernelLaunch(mshadow::Stream<xpu> *s,
-                                             const std::vector<mxnet::TBlob> &inputs) {
-  mxnet::op::mxnet_op::Kernel<half_dequantize_2bit, xpu>
-  ::Launch(s,
-           inputs[1].Size(),         // original size
-           inputs[1].dptr<int>(),  // to array
-           inputs[0].dptr<float>()); // from array
-}
-
-inline void Dequantize2BitForSumImpl(mshadow::Stream<mshadow::cpu> *s,
-                                     const std::vector<mxnet::TBlob> &inputs) {
-  Dequantize2BitForSumKernelLaunch(s, inputs);
-}
-
-struct requantize {
+struct quantize_logk {
   MSHADOW_XINLINE static void Map(int out_block_id,   // id of parallel kernel
                                   int num_blocks,
                                   int block_size,     // number of output floats to process by each call
@@ -328,7 +269,7 @@ struct requantize {
   }
 };
 
-struct derequantize {
+struct dequantize_logk {
   MSHADOW_XINLINE static void Map(int compr_block_id,   // id of parallel kernel
                                   int num_blocks,
                                   int block_size,     // number of compressed floats to process by each call
@@ -383,10 +324,10 @@ struct derequantize {
 };
 
 template<typename xpu>
-inline void RequantizeKernelLaunch(mshadow::Stream<xpu> *s,
-                           const std::vector<mxnet::TBlob> &inputs,
-                           const int num_workers,
-                           const int original_size) {
+inline void QuantizeLogKKernelLaunch(mshadow::Stream<xpu> *s,
+                                     const std::vector<mxnet::TBlob> &inputs,
+                                     const int num_workers,
+                                     const int original_size) {
   int block_size = lcm(num_workers, 32) / 32;
   // each block is responsible for block_size number of floats into which compressed data is packed
 
@@ -397,7 +338,7 @@ inline void RequantizeKernelLaunch(mshadow::Stream<xpu> *s,
     LOG(FATAL) << "Gradient compression unsupported for this type and number of workers right now";
   }
 
-  mxnet::op::mxnet_op::Kernel<requantize, xpu>
+  mxnet::op::mxnet_op::Kernel<quantize_logk, xpu>
   ::Launch(s,
            (inputs[1].Size()) / block_size,   // number of parallel kernels, one for each block
            (inputs[1].Size()) / block_size, // number of blocks
@@ -409,7 +350,7 @@ inline void RequantizeKernelLaunch(mshadow::Stream<xpu> *s,
            inputs[0].dptr<int>());   // from int array
 }
 template<typename xpu>
-inline void DerequantizeKernelLaunch(mshadow::Stream<xpu> *s,
+inline void DequantizeLogKKernelLaunch(mshadow::Stream<xpu> *s,
                              const std::vector<mxnet::TBlob> &inputs,
                              const float threshold,
                              const int num_workers,
@@ -421,7 +362,7 @@ inline void DerequantizeKernelLaunch(mshadow::Stream<xpu> *s,
   int num_bits = (int) ceil(log2(float(2 * num_workers + 1)));
 
   CHECK_LE(num_bits, 8);
-  mxnet::op::mxnet_op::Kernel<derequantize, xpu>
+  mxnet::op::mxnet_op::Kernel<dequantize_logk, xpu>
   ::Launch(s,
            (inputs[0].Size())/block_size,   // number of parallel kernels, one for each block
            (inputs[0].Size())/block_size,   // number of blocks
@@ -434,37 +375,30 @@ inline void DerequantizeKernelLaunch(mshadow::Stream<xpu> *s,
            inputs[0].dptr<float>());   // compressed array
 }
 
-inline void RequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
-                           const std::vector<mxnet::TBlob> &inputs,
-                           const int num_workers,
-                           const int original_size) {
-  RequantizeKernelLaunch(s, inputs, num_workers, original_size);
-}
-
-inline void DerequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
-                             const std::vector<mxnet::TBlob> &inputs,
-                             const float threshold,
-                             const int num_workers,
-                             const int original_size) {
-  DerequantizeKernelLaunch(s, inputs, threshold, num_workers, original_size);
-}
-
+// TODO merge below and verify compilation on gpu
 // these gpu functions are defined in gradient_compression.cu
 void Quantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
                       const float threshold);
-void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
-                        const float threshold);
-void Dequantize2BitForSumImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs);
-void RequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
-                    const std::vector<mxnet::TBlob> &inputs,
-                    const int num_workers,
-                    const int original_size);
-void DerequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
-                      const std::vector<mxnet::TBlob> &inputs,
-                      const float threshold,
-                      const int num_workers,
-                      const int original_size);
+void QuantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
+                        const float beta);
+void QuantizeLogKImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
+                        const int num_workers);
 
+template <typename DType>
+void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
+                        const DType threshold);
+
+void DequantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s,
+                          const std::vector<mxnet::TBlob> &inputs);
+
+void DequantizeLogKImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
+                        const float threshold, const int num_workers);
+
+inline void Quantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
+                             const std::vector<mxnet::TBlob> &inputs,
+                             const float threshold) {
+  Quantize2BitKernelLaunch(s, inputs, threshold);
+}
 
 inline void QuantizeSignumImpl(mshadow::Stream<mshadow::cpu> *s,
                              const std::vector<mxnet::TBlob> &inputs,
@@ -472,9 +406,36 @@ inline void QuantizeSignumImpl(mshadow::Stream<mshadow::cpu> *s,
   QuantizeSignumKernelLaunch(s, inputs, beta);
 }
 
+inline void QuantizeLogKImpl(mshadow::Stream<mshadow::cpu> *s,
+                             const std::vector<mxnet::TBlob> &inputs,
+                             const int num_workers) {
+  QuantizeLogKKernelLaunch(s, inputs, num_workers, inputs[0].Size());
+}
+
+template <typename DType>
+inline void Dequantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
+                               const std::vector<mxnet::TBlob> &inputs,
+                               const DType threshold) {
+  Dequantize2BitKernelLaunch(s, inputs, threshold);
+}
+
+
 inline void DequantizeSignumImpl(mshadow::Stream<mshadow::cpu> *s,
-                               const std::vector<mxnet::TBlob> &inputs) {
-  DequantizeSignumKernelLaunch(s, inputs);
+                                 const std::vector<mxnet::TBlob> &inputs) {
+  if (inputs[1].type_flag_ == mshadow::kFloat32) {
+    DequantizeSignumKernelLaunch(s, inputs, (float) 1.0);
+  } else if (inputs[1].type_flag_ == mshadow::kInt32) {
+    DequantizeSignumKernelLaunch(s, inputs, (int) 1);
+  } else {
+    LOG(FATAL) << "Unhandled type";
+  }
+}
+
+inline void DequantizeLogKImpl(mshadow::Stream<mshadow::cpu> *s,
+                               const std::vector<mxnet::TBlob> &inputs,
+                               const float threshold,
+                               const int num_workers) {
+  DequantizeLogKKernelLaunch(s, inputs, threshold, num_workers, inputs[1].Size());
 }
 
 }  // namespace kvstore

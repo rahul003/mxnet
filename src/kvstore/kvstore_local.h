@@ -142,6 +142,7 @@ class KVStoreLocal : public KVStore {
   void SetGradientCompression(const std::vector<std::pair<std::string, std::string> >
                               & kwargs) override {
     gradient_compression_->SetParams(kwargs);
+    gradient_compression_->SetNumWorkers(ps::NumWorkers());
   }
 
 private:

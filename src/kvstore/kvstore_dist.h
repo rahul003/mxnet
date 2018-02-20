@@ -380,8 +380,7 @@ class KVStoreDist : public KVStoreLocal {
           if (decomp_buf.is_none()) {
             decomp_buf = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_, false, grouped_vals[i][0]->dtype());
           }
-          gradient_compression_->Derequantize(ps::NumWorkers(), grouped_vals[i][0]->shape().Size(),
-                                              recv_compr_buf, &decomp_buf, priority);
+          gradient_compression_->Dequantize(recv_compr_buf, &decomp_buf, priority, CompressionType::kLogK);
           if (updater_) {
             exec_.Exec([this, key, decomp_buf, &stored]() {
               CHECK(updater_);

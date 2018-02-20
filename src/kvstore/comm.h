@@ -509,6 +509,7 @@ class CommDevice : public Comm {
       for (const auto& a : src) {
         devs.push_back(a.ctx());
       }
+      gc_->SetNumWorkers(devs.size());
       InitMergeBuffer(devs);
       if (dmlc::GetEnv("MXNET_ENABLE_GPU_P2P", 1)) {
         EnableP2P(devs);
@@ -660,7 +661,6 @@ class CommDevice : public Comm {
         buf.compressed_recv_buf[i] = buf.compressed_send_buf[i];
       }
       gc_->DequantizeForSum(buf.compressed_recv_buf[i], &(buf.int_array[i]), priority);
-//      gc_->Dequantize(buf.compressed_recv_buf[i], &(buf.copy_buf[i]), priority);
       reduce[i] = buf.int_array[i];
     }
     ElementwiseSum(reduce, &buf.merged_int_array);
@@ -672,7 +672,7 @@ class CommDevice : public Comm {
       requantized = NDArray(TShape{gc_->GetRecompressedSize(src.size(), buf.merged_int_array.shape().Size())},
                             buf.merged.ctx(), false, src[0].dtype());
     }
-    gc_->Requantize(src.size(), buf.merged.shape().Size(), buf.merged_int_array, &requantized, priority);
+    gc_->Quantize(buf.merged_int_array, &requantized, priority, CompressionType::kLogK);
     return requantized;
   }
 
@@ -687,8 +687,7 @@ class CommDevice : public Comm {
                                 false, dst_fullsize[i]->dtype());
       CHECK(!requantized.is_none()) << "key : "<<key;
       CopyFromTo(requantized, dst[i], priority);
-      gc_->Derequantize(dst_fullsize.size(), dst_fullsize[0]->shape().Size(),
-                        dst[i], dst_fullsize[i], priority);
+      gc_->Dequantize(dst[i], dst_fullsize[i], priority, CompressionType::kLogK);
     }
   }
 
