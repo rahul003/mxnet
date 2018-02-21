@@ -664,15 +664,18 @@ class CommDevice : public Comm {
       reduce[i] = buf.int_array[i];
     }
     ElementwiseSum(reduce, &buf.merged_int_array);
-
     NDArray& requantized = requantized_send_buf_[key];
-
     if (requantized.is_none()) {
       std::cout<<"Created requantized send buf for key "<<key<<std::endl;
-      requantized = NDArray(TShape{gc_->GetRecompressedSize(src.size(), buf.merged_int_array.shape().Size())},
+      requantized = NDArray(TShape{gc_->GetRecompressedSize(buf.merged_int_array.shape().Size())},
                             buf.merged.ctx(), false, src[0].dtype());
     }
-    gc_->Quantize(buf.merged_int_array, &requantized, priority, CompressionType::kLogK);
+    gc_->Requantize(buf.merged_int_array, &requantized, priority);
+
+    // clear for next call
+    for (size_t i=0; i<src.size(); ++i) {
+      buf.int_array[i] = 0;
+    }
     return requantized;
   }
 
@@ -687,7 +690,7 @@ class CommDevice : public Comm {
                                 false, dst_fullsize[i]->dtype());
       CHECK(!requantized.is_none()) << "key : "<<key;
       CopyFromTo(requantized, dst[i], priority);
-      gc_->Dequantize(dst[i], dst_fullsize[i], priority, CompressionType::kLogK);
+      gc_->DequantizeFinal(dst[i], dst_fullsize[i], priority);
     }
   }
 

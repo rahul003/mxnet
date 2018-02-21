@@ -329,8 +329,7 @@ class KVStoreDist : public KVStoreLocal {
       } else {
         if (recv_compr_buf.is_none()) {
           TShape recompr_shape = TShape{gradient_compression_->
-                 GetRecompressedSize(ps::NumWorkers(),
-                                     (int64_t) grouped_vals[i][0]->shape().Size())};
+                 GetRecompressedSize((int64_t) grouped_vals[i][0]->shape().Size())};
           recv_compr_buf = NDArray(recompr_shape, pinned_ctx_,
                                    true, grouped_vals[i][0]->dtype());
         }
@@ -380,7 +379,7 @@ class KVStoreDist : public KVStoreLocal {
           if (decomp_buf.is_none()) {
             decomp_buf = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_, false, grouped_vals[i][0]->dtype());
           }
-          gradient_compression_->Dequantize(recv_compr_buf, &decomp_buf, priority, CompressionType::kLogK);
+          gradient_compression_->DequantizeFinal(recv_compr_buf, &decomp_buf, priority);
           if (updater_) {
             exec_.Exec([this, key, decomp_buf, &stored]() {
               CHECK(updater_);
@@ -721,7 +720,7 @@ class KVStoreDist : public KVStoreLocal {
     int num_workers = ps::NumWorkers();
     CHECK_GT(num_servers, 0);
 
-    size_t pull_compr_size = gradient_compression_->GetRecompressedSize(num_workers, original_size);
+    size_t pull_compr_size = gradient_compression_->GetRecompressedSize(original_size);
     int block_size = gradient_compression_->GetRequantizeBlockSize(num_workers);
     int num_blocks = pull_compr_size / block_size;
 

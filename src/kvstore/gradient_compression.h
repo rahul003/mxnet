@@ -49,11 +49,12 @@ inline int lcm(int a, int b) {
 }
 
 enum class CompressionType {
-  kNone, kTwoBit, kSignum, kLogK
+  kNone, kTwoBit, kSignum, kLogK, kMajority
 };
 
 struct GradientCompressionParam : public dmlc::Parameter<GradientCompressionParam> {
   std::string type;
+  std::string recompress_type;
   float threshold;
   float beta;
   DMLC_DECLARE_PARAMETER(GradientCompressionParam) {
@@ -63,6 +64,8 @@ struct GradientCompressionParam : public dmlc::Parameter<GradientCompressionPara
       .describe("Threshold to use for 2bit gradient compression");
     DMLC_DECLARE_FIELD(beta).set_default(0.9)
       .describe("Momentum parameter to use for efficient Signum compression");
+    DMLC_DECLARE_FIELD(recompress_type).set_default("majority")
+    .describe("Momentum parameter to use for efficient Signum compression");
   }
 };
 
@@ -88,6 +91,7 @@ class GradientCompression {
    * \brief returns as string the enum value of compression type
    */
   std::string get_type_str();
+  std::string get_recompress_type_str();
 
   /*!
    * \brief sets two bit gradient compression
@@ -132,7 +136,7 @@ class GradientCompression {
      * returns recompressed size after merging partially dequantized gradients from each worker
      * @param num_workers
      */
-  int64_t GetRecompressedSize(const int num_workers, const int64_t original_size);
+  int64_t GetRecompressedSize(const int64_t original_size);
 
   /*!
   * \brief Issues quantize operation to be scheduled by the engine
@@ -142,11 +146,19 @@ class GradientCompression {
   * \param to the target ndarray which contains quantized data
   * \param residual the ndarray which accumulates quantization error
   * \param priority Priority of the action.
+  * \param type of compression
   */
   void Quantize(const mxnet::NDArray &from, mxnet::NDArray *to,
                 mxnet::NDArray *residual, const int priority, const CompressionType type);
+  /*!
+   * \brief This method is used when the type for compression is the original type_
+   */
   void Quantize(const mxnet::NDArray &from, mxnet::NDArray *to, mxnet::NDArray *residual, const int priority);
-  void Quantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority, const CompressionType type);
+
+  /*!
+   * \brief This method is used when type for compression is recompress_type_ . There is no residual for this
+   */
+  void Requantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
 
   /*!
   * \brief Issues dequantize operation to be scheduled by the engine
@@ -159,7 +171,7 @@ class GradientCompression {
   void Dequantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority, const CompressionType type,
                   const T threshold);
   void Dequantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
-  void Dequantize(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority, const CompressionType type);
+  void DequantizeFinal(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
   void DequantizeForSum(const mxnet::NDArray &from, mxnet::NDArray *to, const int priority);
 
 private:
@@ -167,6 +179,7 @@ private:
    * \brief denotes the type of gradient compression which has been set
    */
   CompressionType type_;
+  CompressionType recompress_type_;
 
   /*!
    * \brief denotes threshold used for quantization and dequantization

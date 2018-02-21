@@ -212,7 +212,6 @@ class KVStoreDistServer {
       }
       merged->request.clear();
       stored->WaitToRead();
-//      std::cout<<ps::MyRank()<< " finished default push for key " << key << std::endl;
     } else {
       merged->array.WaitToRead();
     }
@@ -220,13 +219,13 @@ class KVStoreDistServer {
 
   inline void ApplyUpdates2(const int key, MergeBuf *merged, ps::KVServer<real_t>* server, int original_size) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
-      gradient_compression_->Quantize(merged->int_array, &(merged->requantized), 0, CompressionType::kLogK);
+      gradient_compression_->Requantize(merged->int_array, &(merged->requantized), 0);
       for (const auto &req : merged->request) {
         server->Response(req);
       }
       merged->request.clear();
       merged->requantized.WaitToRead();
-//      std::cout<<ps::MyRank()<< " finished default push for key " << key << std::endl;
+      merged->int_array = 0;
     } else {
       merged->int_array.WaitToRead();
     }
@@ -425,8 +424,6 @@ class KVStoreDistServer {
 
       int original_size = DecodeKey(req_data.keys[0]);
       int key = DecodeKey(req_data.keys[1]);
-//      std::cout<<ps::MyRank()<<" received compressed request for push of key "<<std::endl;
-//      std::cout<<ps::MyRank()<< " receiving datahandlecompressed push for key "<<key<<std::endl;
       size_t ds[] = {(size_t)req_data.lens[1]};
       TShape dshape(ds, ds + 1);
       TBlob recv_blob((real_t*) req_data.vals.data(), // NOLINT(*)
@@ -441,9 +438,8 @@ class KVStoreDistServer {
           merged.int_array = NDArray(dshape, Context(), false, mshadow::kInt32);
           merged.int_array = 0;
           TShape requant_shape = TShape{gradient_compression_->
-                                        GetRecompressedSize(ps::NumWorkers(), (int64_t) original_size)};
+                                        GetRecompressedSize((int64_t) original_size)};
           merged.requantized = NDArray(requant_shape, Context());
-//          std::cout<<ps::MyRank()<<" created requantized for key"<<key<<std::endl;
         }
         gradient_compression_->DequantizeForSum(recved, &merged.int_array, 0);
         merged.request.push_back(req_meta);
@@ -464,13 +460,10 @@ class KVStoreDistServer {
       CHECK_EQ(req_data.keys.size(), (size_t)1);
       CHECK_EQ(req_data.lens.size(), (size_t)0);
       int key = DecodeKey(req_data.keys[0]);
-//      std::cout<<ps::MyRank()<< " receiving datahandle compressed pull for key "<<key<< " of type "<<req_meta.cmd<<std::endl;
       DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
       if (recved_type == DataHandleType::kCompressedPushPull) {
-//        std::cout<<ps::MyRank()<<": sending response for requantized array of key"<<key<<std::endl;
         DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server);
       } else if (recved_type == DataHandleType::kCompressedInit) {
-//	      std::cout<<ps::MyRank()<<": sending response for store of key "<<key<<std::endl;
         DefaultStorageResponse(key, store_[key], req_meta, req_data, server);
       } else {
         LOG(FATAL) << "Unexpected command to server "<<req_meta.cmd;
