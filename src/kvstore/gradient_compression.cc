@@ -200,10 +200,10 @@ void GradientCompression::Quantize(const mxnet::NDArray &from,
                                    const CompressionType type) {
   CHECK(from.shape().ndim() != 0) << "source operand has zero dimension shape";
   CHECK(to->shape().ndim() != 0) << "destination operand has zero dimension shape";
-  CHECK(residual->shape().ndim() != 0) << "residual operand has zero dimension shape";
   const int a = from.ctx().dev_mask();
   const int b = to->ctx().dev_mask();
   if (type == CompressionType::kTwoBit) {
+    CHECK(residual->shape().ndim() != 0) << "residual operand has zero dimension shape";
     const float threshold = threshold_;
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
       mxnet::Engine::Get()->PushSync([from, to, residual, threshold](mxnet::RunContext ctx) {
@@ -229,6 +229,7 @@ void GradientCompression::Quantize(const mxnet::NDArray &from,
 #endif
     }
   } else if (type == CompressionType::kSignum) {
+    CHECK(residual->shape().ndim() != 0) << "residual operand has zero dimension shape";
     const float beta = beta_;
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
       mxnet::Engine::Get()->PushSync([from, to, residual, beta](mxnet::RunContext ctx) {

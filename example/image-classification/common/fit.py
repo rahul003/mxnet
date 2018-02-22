@@ -152,7 +152,7 @@ def fit(args, network, data_loader, **kwargs):
     if args.gc_type != 'none':
         kv.set_gradient_compression({'type': args.gc_type,
                                      'threshold': args.gc_threshold,
-                                     'recompress_type': args.recompress_type})
+                                     'recompress_type': args.gc_recompress_type})
 
     # logging
     head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
