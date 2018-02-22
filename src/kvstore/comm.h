@@ -509,7 +509,6 @@ class CommDevice : public Comm {
       for (const auto& a : src) {
         devs.push_back(a.ctx());
       }
-      gc_->SetNumWorkers(devs.size());
       InitMergeBuffer(devs);
       if (dmlc::GetEnv("MXNET_ENABLE_GPU_P2P", 1)) {
         EnableP2P(devs);
@@ -522,6 +521,9 @@ class CommDevice : public Comm {
     // when this reduce is called from kvstore_dist, gc is not set
     // we don't do compression twice in dist_sync_device
     if ((gc_ != nullptr) && (gc_->get_type() != CompressionType::kNone)) {
+      if (!inited_) {
+        gc_->SetNumWorkers(src.size());
+      }
       return HalfReduceCompressed(key, src, priority);
     }
 
