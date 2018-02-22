@@ -88,7 +88,7 @@ std::string GradientCompression::get_type_str() {
   return std::to_string(static_cast<int>(type_));
 }
 
-std::string GradientCompression::get_recompression_type_str() {
+std::string GradientCompression::get_recompress_type_str() {
   return std::to_string(static_cast<int>(recompress_type_));
 }
 
@@ -111,7 +111,10 @@ std::string GradientCompression::EncodeParams() {
   string rval = get_type_str();
   if (type_ == CompressionType::kTwoBit) {
     rval += "," + to_string(threshold_);
+  } else if (type_ == CompressionType::kSignum) {
+    rval += "," + to_string(beta_);
   }
+  rval +=  "," + get_recompress_type_str();
   return rval;
 }
 
@@ -119,10 +122,14 @@ void GradientCompression::DecodeParams(const std::string &s) {
   std::vector<std::string> elems;
   split(s, ',', std::back_inserter(elems));
   type_ = static_cast<CompressionType>(stoi(elems[0]));
-  if (elems.size() > 1) {
-    if (!elems[1].empty()) {
-      threshold_ = stof(elems[1]);
-    }
+  CHECK_GE(elems.size(), 2);
+  if (type_ == CompressionType::kTwoBit) {
+    threshold_ = stof(elems[1]);
+  } else if(type_ == CompressionType::kSignum) {
+    beta_ = stof(elems[1]);
+  }
+  if (elems.size() > 2) {
+    recompress_type_ = static_cast<CompressionType>(stoi(elems[2]));
   }
 }
 

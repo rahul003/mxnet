@@ -92,7 +92,7 @@ class GradientCompression {
    * \brief returns as string the enum value of compression type
    */
   std::string get_type_str();
-  std::string get_recompression_type_str();
+  std::string get_recompress_type_str();
 
   /*!
    * \brief sets two bit gradient compression
