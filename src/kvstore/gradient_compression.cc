@@ -157,7 +157,7 @@ int64_t GradientCompression::GetRecompressedSize(const int64_t original_size) {
   } else if (recompress_type_ == CompressionType::kMajority) {
     return GetCompressedSize(original_size);
   }
-  LOG(FATAL) << "Unsupported compression type: " << get_recompression_type_str();
+  LOG(FATAL) << "Unsupported compression type: " << get_recompress_type_str();
   return 0;
 }
 

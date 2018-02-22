@@ -86,7 +86,7 @@ class GradientCompression {
    * \brief returns type of compression if any
    */
   CompressionType get_type();
-  CompressionType get_recompression_type();
+  CompressionType get_recompress_type();
 
   /*!
    * \brief returns as string the enum value of compression type
