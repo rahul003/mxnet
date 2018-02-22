@@ -64,7 +64,7 @@ struct GradientCompressionParam : public dmlc::Parameter<GradientCompressionPara
       .describe("Threshold to use for 2bit gradient compression");
     DMLC_DECLARE_FIELD(beta).set_default(0.9)
       .describe("Momentum parameter to use for efficient Signum compression");
-    DMLC_DECLARE_FIELD(recompress_type).set_default("majority")
+    DMLC_DECLARE_FIELD(recompress_type).set_default("none")
     .describe("Momentum parameter to use for efficient Signum compression");
   }
 };
@@ -86,12 +86,13 @@ class GradientCompression {
    * \brief returns type of compression if any
    */
   CompressionType get_type();
+  CompressionType get_recompression_type();
 
   /*!
    * \brief returns as string the enum value of compression type
    */
   std::string get_type_str();
-  std::string get_recompress_type_str();
+  std::string get_recompression_type_str();
 
   /*!
    * \brief sets two bit gradient compression

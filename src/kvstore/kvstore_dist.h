@@ -714,19 +714,18 @@ class KVStoreDist : public KVStoreLocal {
    * Populates both push and pull pskv on first call
    */
   inline PSKV& EncodeCompressedKey(int key, size_t original_size, bool is_push, bool is_active = true) {
-//    std::cout<<"key:"<<key<<"; original size:"<<original_size<<" ";
     auto krs = ps::Postoffice::Get()->GetServerKeyRanges();
     int num_servers = krs.size();
     int num_workers = ps::NumWorkers();
     CHECK_GT(num_servers, 0);
 
     size_t pull_compr_size = gradient_compression_->GetRecompressedSize(original_size);
+
     int block_size = gradient_compression_->GetRequantizeBlockSize(num_workers);
     int num_blocks = pull_compr_size / block_size;
 
     // represents size of data to be sent by worker
     size_t compr_size = gradient_compression_->GetCompressedSize(original_size);
-//    std::cout<<"compr_size "<<compr_size<<"; pull_compr_size:"<<pull_compr_size<<std::endl;
 
     mu_.lock();
     PSKV& pskv = (is_push) ? compr_ps_kv_[key].push : compr_ps_kv_[key].pull;
@@ -737,7 +736,6 @@ class KVStoreDist : public KVStoreLocal {
       CHECK_EQ(static_cast<size_t >(pskv.size), size)<< ps::MyRank()<<
                   ": The value size can't be changed. is_push is "<<is_push<<"; for key "<<key;
     } else {
-//      std::cout<<ps::MyRank()<<" encoded compressed pskv for key"<<key<<std::endl;
       // populate both pull and push pskvs
       // push pskv has sizes corresponding to compressed data
       // pull pskv has decompressed sizes for parts in push_pskv
@@ -753,7 +751,7 @@ class KVStoreDist : public KVStoreLocal {
         int server = (key * 9973) % num_servers;
         ps::Key ps_key = krs[server].begin() + key;
         CHECK_LT(ps_key, krs[server].end());
-        // meta info
+        // meta info to let server know about original_size
         push_pskv.keys.push_back(krs[server].begin() + original_size);
         push_pskv.lens.push_back(0);
         // data
@@ -782,15 +780,13 @@ class KVStoreDist : public KVStoreLocal {
             CHECK_EQ((pull_part * 32) % num_bits, 0);
 //            std::cout<<"pull_part: "<<pull_part<<"; push_part "<<push_part<<" ; part_orig "<<part_orig<<std::endl;
           } else {
-//            std::cout<<"num_vblocks: "<<num_blocks<<" ; ";
             part_blocks = static_cast<size_t> (round(static_cast<double>(num_blocks)/num_servers*(i+1))) -
                           static_cast<size_t> (round(static_cast<double>(num_blocks)/num_servers*(i)));
             pull_part = part_blocks * block_size;
-//            std::cout<<"part_blocks: "<<part_blocks<< ";";
+
             part_orig = pull_part * 32 / num_bits;
             CHECK_EQ((pull_part * 32) % num_bits, 0);
             push_part = gradient_compression_->GetCompressedSize(part_orig);
-//            std::cout<<"pull_part: "<<pull_part<<"; push_part "<<push_part<<" ; part_orig "<<part_orig << std::endl;
           }
 
           // meta info
@@ -819,8 +815,6 @@ class KVStoreDist : public KVStoreLocal {
         CHECK_EQ(static_cast<size_t>(push_pskv.size), compr_size);
         CHECK_EQ(static_cast<size_t>(pull_pskv.size), pull_compr_size);
         CHECK_EQ(static_cast<size_t>(inactive_pull_pskv.size), original_size);
-//        std::cout<<"for key:"<<key<<"; push_pskv size: "<<compr_size<<"; pull_pskv.size:"
-//                 <<pull_compr_size<<"; inactive_pull_pskv.size:"<<original_size<<std::endl;
         CHECK_EQ(push_pskv.lens.size(), num_servers*2);
       }
       if (!is_active) return inactive_pull_pskv;
