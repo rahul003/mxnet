@@ -126,6 +126,8 @@ def add_fit_args(parser):
                              takes `2bit` or `none` for now')
     train.add_argument('--gc-threshold', type=float, default=0.5,
                        help='threshold for 2bit gradient compression')
+    train.add_argument('--gc-recompress-type', type=str, default="majority",
+                        help='type of compression to use for recompressing merged compressed gradients')
     # additional parameters for large batch sgd
     train.add_argument('--macrobatch-size', type=int, default=0,
                        help='distributed effective batch size')
@@ -149,7 +151,8 @@ def fit(args, network, data_loader, **kwargs):
     kv = mx.kvstore.create(args.kv_store)
     if args.gc_type != 'none':
         kv.set_gradient_compression({'type': args.gc_type,
-                                     'threshold': args.gc_threshold})
+                                     'threshold': args.gc_threshold,
+                                     'recompress_type': args.recompress_type})
 
     # logging
     head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
