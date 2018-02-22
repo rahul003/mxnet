@@ -43,8 +43,8 @@ void QuantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s,
 
 void QuantizeFromIntSumImpl(mshadow::Stream<mshadow::gpu> *s,
                             const std::vector <mxnet::TBlob> &inputs,
-                            const int num_workers) {
-  QuantizeFromIntSumKernelLaunch(s, inputs, num_workers, inputs[0].Size());
+                            const int num_workers, const CompressionType type) {
+  QuantizeFromIntSumKernelLaunch(s, inputs, num_workers, inputs[0].Size(), type);
 }
 
 void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s,
