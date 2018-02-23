@@ -155,6 +155,7 @@ class KVStoreDist : public KVStoreLocal {
   void SetGradientCompression(const std::vector<std::pair<std::string, std::string> >
                               & kwargs) override {
     KVStoreLocal::SetGradientCompression(kwargs);
+    gradient_compression_->SetNumWorkers(ps::NumWorkers());
     if (get_rank() == 0) {
       SendCommandToServers(static_cast<int>(CommandType::kSetGradientCompression),
                            gradient_compression_->EncodeParams());
@@ -222,7 +223,7 @@ class KVStoreDist : public KVStoreLocal {
   struct ComprPSKV {
     PSKV push;
     PSKV pull;
-    PSKV inactive_pull;
+    PSKV full_pull;
   };
 
   /**
@@ -256,7 +257,6 @@ class KVStoreDist : public KVStoreLocal {
         send_buf_[key].WaitToWrite();
         recv_buf_[key].WaitToWrite();
         compr_buf_[key].WaitToWrite();
-        std::cout<<"init of "<<key << " by "<<ps::MyRank();
       }
     } else {
       // do nothing
@@ -441,7 +441,6 @@ class KVStoreDist : public KVStoreLocal {
         if (stored.is_none()) {
           stored = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_);
           CopyFromTo(recv_buf, stored, priority);
-          std::cout<<"stored is created"<<std::endl;
         } else {
           // if stored is not none, no need to copy as that is the case when we are doing full pulls always
           CHECK(gradient_compression_->get_recompress_type() == CompressionType::kNone);
@@ -759,36 +758,38 @@ class KVStoreDist : public KVStoreLocal {
    * Divides original array into equal parts for each server
    * Populates both push and pull pskv on first call
    */
-  inline PSKV& EncodeCompressedKey(int key, size_t original_size, bool is_push, bool is_active = true) {
-    auto krs = ps::Postoffice::Get()->GetServerKeyRanges();
-    int num_servers = krs.size();
-    int num_workers = ps::NumWorkers();
-    CHECK_GT(num_servers, 0);
+  inline PSKV& EncodeCompressedKey(int key, size_t original_size, bool is_push, bool is_compressed = true) {
 
-    size_t pull_compr_size = gradient_compression_->GetRecompressedSize(original_size);
-
-    int block_size = gradient_compression_->GetRequantizeBlockSize(num_workers);
-    int num_blocks = pull_compr_size / block_size;
-
-    // represents size of data to be sent by worker
-    size_t compr_size = gradient_compression_->GetCompressedSize(original_size);
 
     mu_.lock();
-    PSKV& pskv = (is_push) ? compr_ps_kv_[key].push : compr_ps_kv_[key].pull;
+    PSKV& pskv = (is_compressed && is_push) ? compr_ps_kv_[key].push :
+                 ((is_compressed) ? compr_ps_kv_[key].pull : compr_ps_kv_[key].full_pull);
     mu_.unlock();
 
+    // represents size of data to be sent by worker
+    size_t push_compr_size = gradient_compression_->GetCompressedSize(original_size);
+    size_t pull_compr_size = gradient_compression_->GetRecompressedSize(original_size);
+    size_t push_size = (is_compressed) ? push_compr_size : original_size;
+    size_t pull_size = (is_compressed) ? pull_compr_size : original_size;
+
     if (!pskv.keys.empty()) {
-      size_t size = (is_push) ? compr_size: pull_compr_size;
-      CHECK_EQ(static_cast<size_t >(pskv.size), size)<< ps::MyRank()<<
-                  ": The value size can't be changed. is_push is "<<is_push<<"; for key "<<key;
+      size_t size = (is_push) ? push_size: pull_size;
+      CHECK_EQ(static_cast<size_t >(pskv.size), size)<< ps::MyRank()
+              <<": The value size can't be changed. is_push is "<<is_push
+              <<"; and is_compressed is "<<is_compressed << " for key "<<key;
     } else {
+      auto krs = ps::Postoffice::Get()->GetServerKeyRanges();
+      int num_servers = krs.size();
+      int num_workers = ps::NumWorkers();
+      CHECK_GT(num_servers, 0);
+
       // populate both pull and push pskvs
       // push pskv has sizes corresponding to compressed data
       // pull pskv has decompressed sizes for parts in compr_push_pskv
       mu_.lock();
       PSKV& compr_pull_pskv = compr_ps_kv_[key].pull;
       PSKV& compr_push_pskv = compr_ps_kv_[key].push;
-      PSKV& full_pull_pskv = compr_ps_kv_[key].inactive_pull;
+      PSKV& full_pull_pskv = compr_ps_kv_[key].full_pull;
       mu_.unlock();
 
       if (original_size < bigarray_bound_) {
@@ -802,8 +803,8 @@ class KVStoreDist : public KVStoreLocal {
         compr_push_pskv.lens.push_back(0);
         // data
         compr_push_pskv.keys.push_back(ps_key);
-        compr_push_pskv.lens.push_back(compr_size);
-        compr_push_pskv.size = compr_size;
+        compr_push_pskv.lens.push_back(push_compr_size);
+        compr_push_pskv.size = push_compr_size;
 
         compr_pull_pskv.keys.push_back(ps_key);
         compr_pull_pskv.lens.push_back(pull_compr_size);
@@ -815,13 +816,17 @@ class KVStoreDist : public KVStoreLocal {
       } else {
         // partition it to all servers
         compr_push_pskv.size = 0;
+        full_pull_pskv.size = 0;
         compr_pull_pskv.size = 0;
+
+        int block_size = gradient_compression_->GetRequantizeBlockSize(num_workers);
+        int num_blocks = pull_compr_size / block_size;
         size_t num_bits = gradient_compression_->GetRequantizeNumBits(num_workers);
         for (int i = 0; i < num_servers; ++i) {
           size_t push_part, part_orig, pull_part, part_blocks;
           if (i == num_servers-1) {
             pull_part = pull_compr_size - compr_pull_pskv.size;
-            push_part = compr_size - compr_push_pskv.size;
+            push_part = push_compr_size - compr_push_pskv.size;
             part_orig = pull_part * 32 / num_bits;
             CHECK_EQ((pull_part * 32) % num_bits, 0);
           } else {
@@ -857,12 +862,14 @@ class KVStoreDist : public KVStoreLocal {
           full_pull_pskv.lens.push_back(part_orig);
           full_pull_pskv.size += part_orig;
         }
-        CHECK_EQ(static_cast<size_t>(compr_push_pskv.size), compr_size);
+        CHECK_EQ(static_cast<size_t>(compr_push_pskv.size), push_compr_size);
         CHECK_EQ(static_cast<size_t>(compr_pull_pskv.size), pull_compr_size);
         CHECK_EQ(static_cast<size_t>(full_pull_pskv.size), original_size);
         CHECK_EQ(compr_push_pskv.lens.size(), num_servers*2);
+        if (gradient_compression_->get_recompress_type() == CompressionType::kNone) {
+          CHECK_EQ(static_cast<size_t>(compr_pull_pskv.size), original_size);
+        }
       }
-      if (!is_active) return full_pull_pskv;
     }
     return pskv;
   }

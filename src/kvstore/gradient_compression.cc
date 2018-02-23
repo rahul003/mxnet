@@ -53,6 +53,7 @@ DMLC_REGISTER_PARAMETER(GradientCompressionParam);
 
 GradientCompression::GradientCompression() {
   type_ = CompressionType::kNone;
+  recompress_type_ = CompressionType::kNone;
 }
 
 void GradientCompression::SetParams(const std::vector<std::pair<std::string, std::string> >
@@ -84,7 +85,7 @@ CompressionType GradientCompression::get_type() {
 }
 
 CompressionType GradientCompression::get_recompress_type() {
-  return type_;
+  return recompress_type_;
 }
 
 std::string GradientCompression::get_type_str() {
@@ -159,9 +160,12 @@ int64_t GradientCompression::GetRecompressedSize(const int64_t original_size) {
       return ceil((original_size * ceil(log2(2 * num_workers_ + 1))) / 32);
   } else if (recompress_type_ == CompressionType::kMajority) {
     return GetCompressedSize(original_size);
+  } else if (recompress_type_ == CompressionType::kNone) {
+    return original_size;
+  } else {
+    LOG(FATAL) << "Unsupported recompression type: " << get_recompress_type_str();
+    return 0;
   }
-  LOG(FATAL) << "Unsupported compression type: " << get_recompress_type_str();
-  return 0;
 }
 
 // returns number of floats in requantized data Block for logk
@@ -178,6 +182,8 @@ int GradientCompression::GetRequantizeNumBits(const int num_workers) {
     return (int) ceil(log2((2 * num_workers + 1)));
   } else if (recompress_type_ == CompressionType::kMajority) {
     return 1;
+  } else if (recompress_type_ == CompressionType::kNone) {
+    return 32;
   } else {
     LOG(FATAL) << "Check recompress type";
     return 0;
