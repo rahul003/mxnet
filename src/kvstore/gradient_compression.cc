@@ -61,9 +61,6 @@ void GradientCompression::SetParams(const std::vector<std::pair<std::string, std
   params.InitAllowUnknown(kwargs);
   CHECK_GT(params.threshold, 0) << "threshold must be greater than 0";
   if (params.type == "2bit") {
-    if (recompress_type_ == CompressionType::kNone || recompress_type_ == CompressionType::kMajority) {
-      LOG(FATAL) <<" Unsupported for now";
-    }
     SetTwoBitCompression(params.threshold);
   } else if (params.type == "signum") {
     SetSignumCompression(params.beta);
@@ -75,12 +72,18 @@ void GradientCompression::SetParams(const std::vector<std::pair<std::string, std
     recompress_type_ = CompressionType::kMajority;
   } else if (params.recompress_type == "logk") {
     recompress_type_ = CompressionType::kLogK;
+  } else if (params.recompress_type == "none") {
+    recompress_type_ = CompressionType::kNone;
   } else {
     LOG(FATAL) << "Unknown type for recompress type in gradient compression " << params.recompress_type;
   }
 }
 
 CompressionType GradientCompression::get_type() {
+  return type_;
+}
+
+CompressionType GradientCompression::get_recompress_type() {
   return type_;
 }
 
@@ -177,6 +180,7 @@ int GradientCompression::GetRequantizeNumBits(const int num_workers) {
     return 1;
   } else {
     LOG(FATAL) << "Check recompress type";
+    return 0;
   }
 }
 

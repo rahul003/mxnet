@@ -108,7 +108,7 @@ enum class CommandType {
 };
 
 enum class DataHandleType {
-  kDefaultPushPull, kCompressedPushPull, kRowSparsePushPull, kCompressedInit
+  kDefaultPushPull, kCompressedPush, kRowSparsePushPull, kCompressedFullPull, kCompressedPull
 };
 
 class KVStoreDistServer {
@@ -182,8 +182,9 @@ class KVStoreDistServer {
     DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
     if (recved_type == DataHandleType::kRowSparsePushPull) {
       DataHandleRowSparse(req_meta, req_data, server);
-    } else if (recved_type == DataHandleType::kCompressedPushPull ||
-               recved_type == DataHandleType::kCompressedInit ) {
+    } else if (recved_type == DataHandleType::kCompressedPush||
+               recved_type == DataHandleType::kCompressedFullPull ||
+               recved_type == DataHandleType::kCompressedPull) {
       DataHandleCompressed(req_meta, req_data, server);
     } else {
       DataHandleDefault(req_meta, req_data, server);
@@ -217,7 +218,7 @@ class KVStoreDistServer {
     }
   }
 
-  inline void ApplyUpdates2(const int key, MergeBuf *merged, ps::KVServer<real_t>* server, int original_size) {
+  inline void ApplyUpdates(const int key, MergeBuf *merged, ps::KVServer<real_t>* server, int original_size) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
       gradient_compression_->Requantize(merged->int_array, &(merged->requantized), 0);
       for (const auto &req : merged->request) {
@@ -399,10 +400,10 @@ class KVStoreDistServer {
   void DefaultStorageResponse(int key, const NDArray& stored,
                               const ps::KVMeta& req_meta,
                               const ps::KVPairs<real_t> &req_data,
-                              ps::KVServer<real_t>* server) {
+                              ps::KVServer<real_t>* server, int mode) {
+    CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first for mode "<<mode;
     mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server](mxnet::RunContext ctx) {
        ps::KVPairs<real_t> response;
-       CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first";
        auto len = stored.shape().Size();
        response.keys = req_data.keys;
        response.lens = {len};
@@ -426,24 +427,42 @@ class KVStoreDistServer {
       int key = DecodeKey(req_data.keys[1]);
       size_t ds[] = {(size_t)req_data.lens[1]};
       TShape dshape(ds, ds + 1);
-      TBlob recv_blob((real_t*) req_data.vals.data(), // NOLINT(*)
-                      dshape, cpu::kDevMask);
+      TBlob recv_blob((real_t*) req_data.vals.data(), dshape, cpu::kDevMask);
       NDArray recved = NDArray(recv_blob, 0);
       dshape = TShape{(int64_t) original_size};
 
       if (sync_mode_) {
         // synced push
         auto& merged = merge_buf_[key];
-        if (merged.int_array.is_none()) {
-          merged.int_array = NDArray(dshape, Context(), false, mshadow::kInt32);
-          merged.int_array = 0;
-          TShape requant_shape = TShape{gradient_compression_->
-                                        GetRecompressedSize((int64_t) original_size)};
-          merged.requantized = NDArray(requant_shape, Context());
+        if (gradient_compression_->get_recompress_type() == CompressionType::kNone) {
+          auto& stored = store_[key];
+          CHECK(!stored.is_none());
+          NDArray decomp_buf = decomp_buf_[key];
+          if (decomp_buf.is_none()) {
+            decomp_buf = NDArray(dshape, Context());
+          }
+          if (merged.array.is_none()) {
+            merged.array = NDArray(dshape, Context());
+          }
+          if (merged.request.size() == 0) {
+            gradient_compression_->Dequantize(recved, &merged.array, 0);
+          } else {
+            gradient_compression_->Dequantize(recved, &decomp_buf, 0);
+            merged.array += decomp_buf;
+          }
+          ApplyUpdates(key, &merged, &stored, server);
+          merged.request.push_back(req_meta);
+        } else {
+          if (merged.int_array.is_none()) {
+            merged.int_array = NDArray(dshape, Context(), false, mshadow::kInt32);
+            merged.int_array = 0;
+            TShape requant_shape = TShape{gradient_compression_->
+            GetRecompressedSize((int64_t) original_size)};
+            merged.requantized = NDArray(requant_shape, Context());
+          }
+          gradient_compression_->DequantizeForSum(recved, &merged.int_array, 0);
+          ApplyUpdates(key, &merged, server, original_size);
         }
-        gradient_compression_->DequantizeForSum(recved, &merged.int_array, 0);
-        merged.request.push_back(req_meta);
-        ApplyUpdates2(key, &merged, server, original_size);
       } else {
         // async push
         //TODO
@@ -461,17 +480,15 @@ class KVStoreDistServer {
       CHECK_EQ(req_data.lens.size(), (size_t)0);
       int key = DecodeKey(req_data.keys[0]);
       DataHandleType recved_type = static_cast<DataHandleType>(req_meta.cmd);
-      if (recved_type == DataHandleType::kCompressedPushPull) {
-        DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server);
-      } else if (recved_type == DataHandleType::kCompressedInit) {
-        DefaultStorageResponse(key, store_[key], req_meta, req_data, server);
+      if (recved_type == DataHandleType::kCompressedPull) {
+        DefaultStorageResponse(key, merge_buf_[key].requantized, req_meta, req_data, server, 1);
+      } else if (recved_type == DataHandleType::kCompressedFullPull) {
+        DefaultStorageResponse(key, store_[key], req_meta, req_data, server, 0);
       } else {
         LOG(FATAL) << "Unexpected command to server "<<req_meta.cmd;
       }
     }
   }
-
-
 
   void DataHandleDefault(const ps::KVMeta& req_meta,
                          const ps::KVPairs<real_t> &req_data,
@@ -524,8 +541,7 @@ class KVStoreDistServer {
         stored.WaitToRead();
       }
     } else {
-//      std::cout<<ps::MyRank()<< " receiving datahandledefault pull for key "<<key<<std::endl;
-      DefaultStorageResponse(key, stored, req_meta, req_data, server);
+      DefaultStorageResponse(key, stored, req_meta, req_data, server, 0);
     }
   }
 
