@@ -408,11 +408,17 @@ class KVStoreDist : public KVStoreLocal {
         pskv.keys, vals, &pskv.lens, cmd, [vals, cb]() { delete vals; cb(); });
 
       };
+      std::vector<Engine::VarHandle> mutable_vars = {send_buf.var(), recv_buf.var()};
+      //send_buf is taken as write dep so that push doesn't go first
+      if (gradient_compression_->get_recompress_type() != CompressionType::kNone) {
+        mutable_vars.push_back(recv_compr_buf.var());
+      }
+
       CHECK_NOTNULL(Engine::Get())->PushAsync(
       pull_from_servers,
       pinned_ctx_,
       {},
-      {send_buf.var(), recv_compr_buf.var(), recv_buf.var()}, //send_buf is taken as write dep so that push doesn't go first
+      mutable_vars,
       FnProperty::kNormal,
       priority,
       PROFILER_MESSAGE("KVStoreDistDefaultStoragePullCompressed"));
