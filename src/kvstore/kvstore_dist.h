@@ -258,6 +258,7 @@ class KVStoreDist : public KVStoreLocal {
         recv_buf_[key].WaitToWrite();
         compr_buf_[key].WaitToWrite();
       }
+//      std::cout<<"init pushed"<<std::endl;
     } else {
       // do nothing
     }
@@ -408,7 +409,9 @@ class KVStoreDist : public KVStoreLocal {
         pskv.keys, vals, &pskv.lens, cmd, [vals, cb]() { delete vals; cb(); });
 
       };
-      std::vector<Engine::VarHandle> mutable_vars = {send_buf.var(), recv_buf.var()};
+
+      std::vector<Engine::VarHandle> mutable_vars = {recv_buf.var(), send_buf.var()};
+      //send_buf.var(),
       //send_buf is taken as write dep so that push doesn't go first
       if (gradient_compression_->get_recompress_type() != CompressionType::kNone) {
         mutable_vars.push_back(recv_compr_buf.var());
@@ -422,8 +425,6 @@ class KVStoreDist : public KVStoreLocal {
       FnProperty::kNormal,
       priority,
       PROFILER_MESSAGE("KVStoreDistDefaultStoragePullCompressed"));
-
-
       NDArray& stored = store_[key];
       if (!full_pull) {
         CHECK(!stored.is_none()) << ps::MyRank() << " stored is none";
@@ -443,6 +444,7 @@ class KVStoreDist : public KVStoreLocal {
           stored = decomp_buf;
         }
         comm_->Broadcast(key, stored, grouped_vals[i], priority);
+        decomp_buf = 0;
       } else {
         if (stored.is_none()) {
           stored = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_);
@@ -601,6 +603,7 @@ class KVStoreDist : public KVStoreLocal {
       FnProperty::kNormal,
       priority,
       PROFILER_MESSAGE("KVStoreDistCompressedPush"));
+
   }
 
   void PushDefault(int key, const NDArray &send_buf, const PSKV& pskv, int priority) {

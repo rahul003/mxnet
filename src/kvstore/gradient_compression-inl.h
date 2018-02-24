@@ -185,13 +185,11 @@ struct dequantize_2bit {
     const uint8_t negmask = negbits[col];
     const uint8_t masked = *ch_ptr & mask;
     if (masked == mask) {
-      *outval = pos_threshold;
+      *outval += pos_threshold;
     } else if (masked == negmask) {
       // use posbits for mask as posbits are both 1s
       // then compare masked with negbits to see if only negbits were set
-      *outval = neg_threshold;
-    } else {
-      *outval = 0;
+      *outval += neg_threshold;
     }
   }
 };
@@ -293,7 +291,6 @@ struct dequantize_logk {
     int end_pos = num_bits - 1;
     uint8_t bitmask = (0x01 << num_bits) - 1;
     for (int i = 0; i < block_size; i++, compr_float++) {
-      *compr_float = 0;
       unsigned char *byte_ptr = reinterpret_cast < unsigned char * > (compr_float);
       while ((end_pos < block_size * 32) &&
              (!is_last || (is_last && num_prev_elems < original_size ))) {
@@ -301,9 +298,9 @@ struct dequantize_logk {
           int curval = *byte_ptr;
           curval >>= (8 - (end_pos % 8) - 1);
           curval &= bitmask;
-          *(out++) = ( curval - num_workers) * threshold;
+
+          *(out++) += ( curval - num_workers) * threshold;
         } else {
-//          uint8_t curval = ((*byte_ptr) >> (8 - (end_pos % 8) - 1));
           uint8_t num_bits_overflowed = (end_pos + 1) % 8;
           // left shift bits into position
           uint8_t curval = *(byte_ptr++) << num_bits_overflowed;
@@ -311,7 +308,8 @@ struct dequantize_logk {
           // now bring next byte bits here
           // TODO confirm byteptr is unaffected
           curval |= (*byte_ptr >> (8 - num_bits_overflowed));
-          *(out++) = (curval - num_workers) * threshold;
+
+          *(out++) += (curval - num_workers) * threshold;
         }
         num_prev_elems++;
 

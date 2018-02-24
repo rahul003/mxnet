@@ -303,12 +303,11 @@ void GradientCompression::Dequantize(const mxnet::NDArray &from, mxnet::NDArray 
 
 void GradientCompression::DequantizeFinal(const mxnet::NDArray &from, mxnet::NDArray *to,
                                      const int priority) {
-  if (recompress_type_ == CompressionType::kMajority) {
-    *to = 0;
-  } // logk automatically sets to 0 before storing dequantized values
+  *to = 0;
   Dequantize(from, to, priority, recompress_type_, threshold_);
 }
 
+// to buffer will be added to
 template<typename T>
 void GradientCompression::Dequantize(const mxnet::NDArray &from,
                                      mxnet::NDArray *to,
