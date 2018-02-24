@@ -142,7 +142,6 @@ class KVStoreLocal : public KVStore {
   void SetGradientCompression(const std::vector<std::pair<std::string, std::string> >
                               & kwargs) override {
     gradient_compression_->SetParams(kwargs);
-    gradient_compression_->SetNumWorkers(ps::NumWorkers());
   }
 
 private:
@@ -160,7 +159,9 @@ private:
   virtual void PushImpl(const std::vector<int>& keys,
                         const std::vector<NDArray>& values,
                         int priority) {
-    if ((gradient_compression_ != nullptr) && (gradient_compression_->get_type() != CompressionType::kNone)) {
+    if ((gradient_compression_ != nullptr) &&
+        (gradient_compression_->get_type() != CompressionType::kNone) &&
+        (gradient_compression_->get_recompress_type() != CompressionType::kNone)) {
       return PushAllToAllImpl(keys, values, priority);
     }
 
@@ -217,7 +218,6 @@ private:
                         std::vector<NDArray*>& grouped_vals,
                         int priority) {
       comm_->BroadcastRequantized(key, grouped_vals, priority);
-
       if (local_on_gpus_[key].size() == 0) {
         auto& local = local_[key];
         local_on_gpus_[key].resize(grouped_vals.size());
@@ -247,13 +247,15 @@ private:
   virtual void PullImpl(const std::vector<int>& keys,
                         const std::vector<NDArray*>& values,
                         int priority) {
-
     std::vector<int> uniq_keys;
     std::vector<std::vector<NDArray*> > grouped_vals;
     GroupKVPairsPull(keys, values, &uniq_keys, &grouped_vals);
     for (size_t i = 0; i < uniq_keys.size(); ++i) {
       int key = uniq_keys[i];
-      if ((gradient_compression_ != nullptr) && (gradient_compression_->get_type() != CompressionType::kNone) && first_pull_done_[key]) {
+      if ((gradient_compression_ != nullptr) &&
+          (gradient_compression_->get_type() != CompressionType::kNone) &&
+          (gradient_compression_->get_recompress_type() != CompressionType::kNone) &&
+           first_pull_done_[key]) {
         PullAllToAllImpl(key, grouped_vals[i], priority);
       } else {
         const NDArray& local = local_[key];

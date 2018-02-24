@@ -524,7 +524,11 @@ class CommDevice : public Comm {
       if (!inited_) {
         gc_->SetNumWorkers(src.size());
       }
-      return HalfReduceCompressed(key, src, priority);
+      if (gc_->get_recompress_type() == CompressionType::kNone) {
+        return ReduceCompressed(key, src, priority);
+      } else {
+        return HalfReduceCompressed(key, src, priority);
+      }
     }
 
     // avoid extra copy for single device, but it may bring problems for
@@ -590,6 +594,8 @@ class CommDevice : public Comm {
       for (size_t i = 0; i < src.size(); ++i) {
         buf.copy_buf[i] = NDArray(buf.merged.shape(), buf.merged.ctx(),
                                   false, buf.merged.dtype());
+        buf.copy_buf[i] = 0;
+
         buf.residual[i] = NDArray(buf.merged.shape(), src[i].ctx(),
                                   false, buf.merged.dtype());
         buf.residual[i] = 0;
@@ -598,6 +604,10 @@ class CommDevice : public Comm {
                                         false, buf.merged.dtype());
         buf.compressed_send_buf[i] = NDArray(TShape{small_size}, src[i].ctx(),
                                         false, buf.merged.dtype());
+      }
+    } else {
+      for (size_t i = 0; i < src.size(); ++i) {
+        buf.copy_buf[i] = 0;
       }
     }
 
@@ -613,7 +623,6 @@ class CommDevice : public Comm {
         // avoid memory copy when they are on same context
         buf.compressed_recv_buf[i] = buf.compressed_send_buf[i];
       }
-
       gc_->Dequantize(buf.compressed_recv_buf[i], &(buf.copy_buf[i]), priority);
       reduce[i] = buf.copy_buf[i];
     }
@@ -648,8 +657,11 @@ class CommDevice : public Comm {
         buf.int_array[i] = NDArray(buf.merged.shape(), buf.merged.ctx(), false, mshadow::kInt32);
         buf.int_array[i] = 0;
       }
+    } else {
+      for (size_t i = 0; i < src.size(); ++i) {
+        buf.int_array[i] = 0;
+      }
     }
-
     for (size_t i = 0; i < src.size(); ++i) {
       // compress before copy
       // this is done even if the data is on same context as copy_buf because
@@ -668,28 +680,22 @@ class CommDevice : public Comm {
     ElementwiseSum(reduce, &buf.merged_int_array);
     NDArray& requantized = requantized_send_buf_[key];
     if (requantized.is_none()) {
-      std::cout<<"Created requantized send buf for key "<<key<<std::endl;
       requantized = NDArray(TShape{gc_->GetRecompressedSize(buf.merged_int_array.shape().Size())},
                             buf.merged.ctx(), false, src[0].dtype());
     }
     gc_->Requantize(buf.merged_int_array, &requantized, priority);
-
-    // clear for next call
-    for (size_t i=0; i<src.size(); ++i) {
-      buf.int_array[i] = 0;
-    }
     return requantized;
   }
 
-  // broadcasts requantized array to each context, then dequantizes the array htere into given args
+  // broadcasts requantized array to each context, then dequantizes the array there into given args
   void BroadcastRequantized(int key,
                  const std::vector<NDArray*> dst_fullsize, int priority) override {
     std::vector<NDArray>& dst = merge_buf_[key].requantized_recv_buf;
     dst.resize(dst_fullsize.size());
     auto& requantized = requantized_send_buf_[key];
     for (size_t i = 0; i < dst_fullsize.size(); ++i) {
-      dst[i] = NDArray(requantized.shape(), dst_fullsize[i]->ctx(),
-                                false, dst_fullsize[i]->dtype());
+//      dst[i] = NDArray(requantized.shape(), dst_fullsize[i]->ctx(),
+//                                false, dst_fullsize[i]->dtype());
       CHECK(!requantized.is_none()) << "key : "<<key;
       CopyFromTo(requantized, dst[i], priority);
       gc_->DequantizeFinal(dst[i], dst_fullsize[i], priority);

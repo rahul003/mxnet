@@ -53,6 +53,7 @@ DMLC_REGISTER_PARAMETER(GradientCompressionParam);
 
 GradientCompression::GradientCompression() {
   type_ = CompressionType::kNone;
+  recompress_type_ = CompressionType::kNone;
 }
 
 void GradientCompression::SetParams(const std::vector<std::pair<std::string, std::string> >
@@ -61,9 +62,6 @@ void GradientCompression::SetParams(const std::vector<std::pair<std::string, std
   params.InitAllowUnknown(kwargs);
   CHECK_GT(params.threshold, 0) << "threshold must be greater than 0";
   if (params.type == "2bit") {
-    if (recompress_type_ == CompressionType::kNone || recompress_type_ == CompressionType::kMajority) {
-      LOG(FATAL) <<" Unsupported for now";
-    }
     SetTwoBitCompression(params.threshold);
   } else if (params.type == "signum") {
     SetSignumCompression(params.beta);
@@ -75,6 +73,8 @@ void GradientCompression::SetParams(const std::vector<std::pair<std::string, std
     recompress_type_ = CompressionType::kMajority;
   } else if (params.recompress_type == "logk") {
     recompress_type_ = CompressionType::kLogK;
+  } else if (params.recompress_type == "none") {
+    recompress_type_ = CompressionType::kNone;
   } else {
     LOG(FATAL) << "Unknown type for recompress type in gradient compression " << params.recompress_type;
   }
@@ -82,6 +82,10 @@ void GradientCompression::SetParams(const std::vector<std::pair<std::string, std
 
 CompressionType GradientCompression::get_type() {
   return type_;
+}
+
+CompressionType GradientCompression::get_recompress_type() {
+  return recompress_type_;
 }
 
 std::string GradientCompression::get_type_str() {
@@ -156,9 +160,12 @@ int64_t GradientCompression::GetRecompressedSize(const int64_t original_size) {
       return ceil((original_size * ceil(log2(2 * num_workers_ + 1))) / 32);
   } else if (recompress_type_ == CompressionType::kMajority) {
     return GetCompressedSize(original_size);
+  } else if (recompress_type_ == CompressionType::kNone) {
+    return original_size;
+  } else {
+    LOG(FATAL) << "Unsupported recompression type: " << get_recompress_type_str();
+    return 0;
   }
-  LOG(FATAL) << "Unsupported compression type: " << get_recompress_type_str();
-  return 0;
 }
 
 // returns number of floats in requantized data Block for logk
@@ -175,8 +182,11 @@ int GradientCompression::GetRequantizeNumBits(const int num_workers) {
     return (int) ceil(log2((2 * num_workers + 1)));
   } else if (recompress_type_ == CompressionType::kMajority) {
     return 1;
+  } else if (recompress_type_ == CompressionType::kNone) {
+    return 32;
   } else {
     LOG(FATAL) << "Check recompress type";
+    return 0;
   }
 }
 
@@ -293,12 +303,11 @@ void GradientCompression::Dequantize(const mxnet::NDArray &from, mxnet::NDArray 
 
 void GradientCompression::DequantizeFinal(const mxnet::NDArray &from, mxnet::NDArray *to,
                                      const int priority) {
-  if (recompress_type_ == CompressionType::kMajority) {
-    *to = 0;
-  } // logk automatically sets to 0 before storing dequantized values
+  *to = 0;
   Dequantize(from, to, priority, recompress_type_, threshold_);
 }
 
+// to buffer will be added to
 template<typename T>
 void GradientCompression::Dequantize(const mxnet::NDArray &from,
                                      mxnet::NDArray *to,
