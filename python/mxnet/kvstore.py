@@ -668,7 +668,7 @@ class KVStore(object):
             Indicates whether to stop statistic output (dumping) after this dump.
             Default is True
         """
-        fin = 1 if finished is True else False
+        fin = 1 if finished else 0
         check_call(_LIB.MXKVStoreSetServerProfilerDump(self.handle, fin))
 
     def set_server_profiler_pause(self):
