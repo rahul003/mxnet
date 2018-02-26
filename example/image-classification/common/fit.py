@@ -135,6 +135,10 @@ def add_fit_args(parser):
                        help='the epochs to ramp-up lr to scaled large-batch value')
     train.add_argument('--warmup-strategy', type=str, default='linear',
                        help='the ramping-up strategy for large batch sgd')
+    train.add_argument('--profile-worker-file', type=str, default='',
+                       help='profile workers actions into this file')
+    train.add_argument('--profile-server-file', type=str, default='server.json',
+                       help='profile server actions into this file during distributed training')
     return train
 
 
@@ -150,6 +154,9 @@ def fit(args, network, data_loader, **kwargs):
     if args.gc_type != 'none':
         kv.set_gradient_compression({'type': args.gc_type,
                                      'threshold': args.gc_threshold})
+    if args.profile_server_file:
+        kv.set_server_profiler_config(file='server.json', profile_all=True)
+        kv.set_server_profiler_state(state='run')
 
     # logging
     head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
@@ -305,3 +312,5 @@ def fit(args, network, data_loader, **kwargs):
               epoch_end_callback=checkpoint,
               allow_missing=True,
               monitor=monitor)
+    if args.profile_server_file:
+        kv.set_server_profiler_state(state='stop')

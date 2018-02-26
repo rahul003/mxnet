@@ -32,6 +32,8 @@
 #include <functional>
 #include <future>
 #include <vector>
+#include <mxnet/c_api.h>
+#include "profiler/profiler.h"
 #include "ps/ps.h"
 #include "mxnet/kvstore.h"
 #include "../operator/tensor/elemwise_binary_op-inl.h"
@@ -41,7 +43,7 @@ namespace mxnet {
 namespace kvstore {
 
 enum class CommandType {
-  kController, kStopServer, kSyncMode, kSetGradientCompression
+  kController, kStopServer, kSyncMode, kSetGradientCompression, kSetProfilerParams
 };
 
 enum class DataHandleType {
@@ -125,6 +127,7 @@ class KVStoreDistServer {
   }
 
   ~KVStoreDistServer() {
+    profiler::Profiler::Get()->SetState(profiler::Profiler::ProfilerState(profiler::Profiler::kNotRunning));
     delete ps_server_;
   }
 
@@ -159,6 +162,18 @@ class KVStoreDistServer {
       sync_mode_ = true;
     } else if (recved_type == CommandType::kSetGradientCompression) {
       gradient_compression_->DecodeParams(recved.body);
+    } else if (recved_type == CommandType::kSetProfilerParams) {
+      KVStoreServerProfilerCommand profiler_command_type =
+          static_cast<KVStoreServerProfilerCommand>(recved.body.back() - '0');
+      if (profiler_command_type == KVStoreServerProfilerCommand::kSetConfig) {
+        SetProfileConfig(recved.body.substr(0, recved.body.size() - 1));
+      } else if (profiler_command_type == KVStoreServerProfilerCommand::kState) {
+        MXSetProfilerState(static_cast<int>(recved.body.front() - '0'));
+      } else if (profiler_command_type == KVStoreServerProfilerCommand::kPause) {
+        MXProfilePause(static_cast<int>(recved.body.front() - '0'));
+      } else if (profiler_command_type == KVStoreServerProfilerCommand::kDump) {
+        MXDumpProfile(static_cast<int>(recved.body.front() - '0'));
+      }
     } else {
       // this uses value 0 for message id from frontend
       // let the main thread to execute ctrl, which is necessary for python
@@ -168,6 +183,30 @@ class KVStoreDistServer {
         });
     }
     app->Response(recved);
+  }
+
+  void SetProfileConfig(std::string params_str) {
+    std::vector<std::string> elems;
+    mxnet::kvstore::split(params_str, ',', std::back_inserter(elems));
+    std::vector<const char*> ckeys;
+    std::vector<const char*> cvals;
+    ckeys.reserve(elems.size());
+    cvals.reserve(elems.size());
+
+    for (int i=0; i < elems.size(); i++) {
+      std::vector<std::string> parts;
+      mxnet::kvstore::split(elems[i], ':', std::back_inserter(parts));
+      LOG(INFO)<<elems[i];
+//      std::cout<<parts[0]<<" "<<parts[1];
+      CHECK_NOTNULL(parts[0].c_str());
+      CHECK_NOTNULL(parts[1].c_str());
+      if (parts[0] == "file") {
+        parts[1] = std::to_string(ps::MyRank()) + parts[1];
+      }
+      ckeys.push_back(parts[0].c_str());
+      cvals.push_back(parts[1].c_str());
+    }
+    MXSetProfilerConfig(elems.size(), &ckeys[0], &cvals[0]);
   }
 
   void DataHandleEx(const ps::KVMeta& req_meta,

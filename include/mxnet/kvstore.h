@@ -38,6 +38,11 @@
 #endif  // MXNET_USE_DIST_KVSTORE
 
 namespace mxnet {
+
+enum class KVStoreServerProfilerCommand {
+  kSetConfig, kState, kPause, kDump
+};
+
 /*!
  * \brief distributed key-value store
  *
@@ -46,6 +51,8 @@ namespace mxnet {
  */
 class KVStore {
  public:
+
+
   /*! \brief virtual destructor */
   virtual ~KVStore() {}
 
@@ -360,6 +367,10 @@ class KVStore {
    * \param cmd_body the body of the command
    */
   virtual void SendCommandToServers(int cmd_id, const std::string& cmd_body) { }
+
+  virtual void SetServerProfilerCommand(KVStoreServerProfilerCommand type, const std::string params) {
+    LOG(FATAL) << "compile with USE_DIST_KVSTORE=1 to use distributed kvstore";
+  };
 
   /**
    * \brief the prototype of a server controller
