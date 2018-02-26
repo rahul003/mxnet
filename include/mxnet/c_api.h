@@ -2005,6 +2005,16 @@ MXNET_DLL int MXKVStoreSendCommmandToServers(KVStoreHandle handle,
                                              int cmd_id,
                                              const char* cmd_body);
 
+
+MXNET_DLL int MXKVStoreSetServerProfileConfig(KVStoreHandle handle,
+                                              int num_params, const char* const* keys, const char* const* vals);
+
+MXNET_DLL int MXKVStoreSetServerProfilerState(KVStoreHandle handle, int state);
+
+MXNET_DLL int MXKVStoreSetServerProfilerPause(KVStoreHandle handle, int state);
+
+MXNET_DLL int MXKVStoreSetServerProfilerDump(KVStoreHandle handle, int finished);
+
 /**
  * \brief Get the number of ps dead node(s) specified by {node_id}
  *

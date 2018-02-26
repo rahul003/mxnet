@@ -25,6 +25,7 @@
 #ifndef MXNET_KVSTORE_KVSTORE_DIST_H_
 #define MXNET_KVSTORE_KVSTORE_DIST_H_
 #include <string>
+#include <sstream>
 #include <vector>
 #include <algorithm>
 #include <utility>
@@ -91,6 +92,12 @@ class KVStoreDist : public KVStoreLocal {
                            gradient_compression_->EncodeParams());
     }
   }
+
+  void SetServerProfilerCommand(KVStoreServerProfilerCommand type, const std::string params) override {
+    SendCommandToServers(static_cast<int>(CommandType::kSetProfilerParams),
+                         params + std::to_string(static_cast<int>(type)));
+  }
+
 
   void Barrier() override {
     ps::Postoffice::Get()->Barrier(ps_worker_->get_customer()->customer_id(), ps::kWorkerGroup);

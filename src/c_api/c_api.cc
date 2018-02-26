@@ -1020,6 +1020,40 @@ int MXKVStoreSendCommmandToServers(KVStoreHandle handle,
   API_END();
 }
 
+int MXKVStoreSetServerProfileConfig(KVStoreHandle handle, int num_params,
+                                    const char* const* keys, const char* const* vals) {
+  API_BEGIN();
+    std::ostringstream os;
+    for (mx_uint i = 0; i < num_params; ++i) {
+      os << keys[i] << ":" << vals[i];
+      if (i != num_params - 1) os << ",";
+    }
+    static_cast<KVStore*>(handle)->SetServerProfilerCommand(mxnet::KVStoreServerProfilerCommand::kSetConfig, os.str());
+  API_END();
+}
+
+
+int MXKVStoreSetServerProfilerState(KVStoreHandle handle, int state) {
+  API_BEGIN();
+    static_cast<KVStore*>(handle)->SetServerProfilerCommand(mxnet::KVStoreServerProfilerCommand::kState,
+                                                            std::to_string(state));
+  API_END();
+}
+
+int MXKVStoreSetServerProfilerPause(KVStoreHandle handle, int state) {
+  API_BEGIN();
+    static_cast<KVStore*>(handle)->SetServerProfilerCommand(mxnet::KVStoreServerProfilerCommand::kPause,
+                                                            std::to_string(state));
+  API_END();
+}
+
+int MXKVStoreSetServerProfilerDump(KVStoreHandle handle, int finished) {
+  API_BEGIN();
+    static_cast<KVStore*>(handle)->SetServerProfilerCommand(mxnet::KVStoreServerProfilerCommand::kDump,
+                                                            std::to_string(finished));
+  API_END();
+}
+
 int MXKVStoreGetType(KVStoreHandle handle,
                      const char** type) {
   API_BEGIN();
