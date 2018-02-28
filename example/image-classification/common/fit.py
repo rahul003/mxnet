@@ -138,7 +138,7 @@ def add_fit_args(parser):
                        help='the ramping-up strategy for large batch sgd')
     train.add_argument('--profile-worker-file', type=str, default='',
                        help='profile workers actions into this file')
-    train.add_argument('--profile-server-file', type=str, default='server.json',
+    train.add_argument('--profile-server-file', type=str, default='',
                        help='profile server actions into this file during distributed training')
     return train
 
