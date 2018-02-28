@@ -196,11 +196,9 @@ class KVStoreDistServer {
     for (int i=0; i < elems.size(); i++) {
       std::vector<std::string> parts;
       mxnet::kvstore::split(elems[i], ':', std::back_inserter(parts));
-      LOG(INFO)<<elems[i];
-//      std::cout<<parts[0]<<" "<<parts[1];
       CHECK_NOTNULL(parts[0].c_str());
       CHECK_NOTNULL(parts[1].c_str());
-      if (parts[0] == "file") {
+      if (parts[0] == "filename") {
         parts[1] = std::to_string(ps::MyRank()) + parts[1];
       }
       ckeys.push_back(parts[0].c_str());
