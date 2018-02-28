@@ -115,6 +115,7 @@ def add_fit_args(parser):
                         help='log network parameters every N iters if larger than 0')
     train.add_argument('--load-epoch', type=int,
                        help='load the model on an epoch using the model-load-prefix')
+    train.add_argument('--role', type=str)
     train.add_argument('--top-k', type=int, default=0,
                        help='report the top-k accuracy. 0 means no report.')
     train.add_argument('--loss', type=str, default='',
@@ -155,7 +156,7 @@ def fit(args, network, data_loader, **kwargs):
         kv.set_gradient_compression({'type': args.gc_type,
                                      'threshold': args.gc_threshold})
     if args.profile_server_file:
-        kv.set_server_profiler_config(file='server.json', profile_all=True)
+        kv.set_server_profiler_config(filename='server.json', profile_all=True)
         kv.set_server_profiler_state(state='run')
 
     # logging
