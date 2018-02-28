@@ -656,7 +656,7 @@ class KVStore(object):
             be 'stop' or 'run'. Default is `stop`.
         """
         state2int = {'stop': 0, 'run': 1}
-        check_call(_LIB.MXKVStoreSetServerProfilerState(ctypes.c_int(state2int[state])))
+        check_call(_LIB.MXKVStoreSetServerProfilerState(self.handle, ctypes.c_int(state2int[state])))
 
     def set_server_profiler_dump(self, finished=True):
         """Dump profile of kvstore server and stop profiler. Use this to save profile
@@ -669,15 +669,15 @@ class KVStore(object):
             Default is True
         """
         fin = 1 if finished is True else False
-        check_call(_LIB.MXKVStoreSetServerProfilerDump(fin))
+        check_call(_LIB.MXKVStoreSetServerProfilerDump(self.handle, fin))
 
     def set_server_profiler_pause(self):
         """Pause profiling of kvstore server."""
-        check_call(_LIB.MXKVStoreSetServerProfilerPause(int(1)))
+        check_call(_LIB.MXKVStoreSetServerProfilerPause(self.handle, int(1)))
 
     def set_server_profiler_resume(self):
         """Resume paused profiling of kvstore server."""
-        check_call(_LIB.MXKVStoreSetServerProfilerPause(int(0)))
+        check_call(_LIB.MXKVStoreSetServerProfilerPause(self.handle, int(0)))
 
 def create(name='local'):
     """Creates a new KVStore.
