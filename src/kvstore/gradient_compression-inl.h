@@ -144,9 +144,11 @@ struct dequantize_signum {
     // gets byte which holds quantized value for this position
     unsigned char *ch_ptr = reinterpret_cast<unsigned char *>(in + (i >> 5));
     ch_ptr += ((i & 31) >> 3);
-
+    const uint8_t mask = 1U << (7- (i & 7) );
+    const uint8_t masked = *ch_ptr & mask;
+   
     // if bit set at that position is 0, set outval to -1 else to 1
-    *outval += ((*ch_ptr & (1U << (7 - ( i & 7 )))) * 2 ) - 1;
+    *outval += (( masked == mask) * 2 ) - 1;
   }
 };
 
