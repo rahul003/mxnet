@@ -138,11 +138,7 @@ def add_fit_args(parser):
                        help='the ramping-up strategy for large batch sgd')
     train.add_argument('--profile-worker-file', type=str, default='',
                        help='profile workers actions into this file')
-<<<<<<< HEAD
     train.add_argument('--profile-server-file', type=str, default='',
-=======
-    train.add_argument('--profile-server-file', type=str, default='server.json',
->>>>>>> implemented args passing for profiler. need to debug segfault
                        help='profile server actions into this file during distributed training')
     return train
 
@@ -161,6 +157,7 @@ def fit(args, network, data_loader, **kwargs):
                                      'threshold': args.gc_threshold})
     if args.profile_server_file:
 <<<<<<< HEAD
+<<<<<<< HEAD
         kv.set_server_profiler_config(filename=args.profile_server_file, profile_all=True)
         kv.set_server_profiler_state(state='run')
     if args.profile_worker_file:
@@ -168,6 +165,9 @@ def fit(args, network, data_loader, **kwargs):
         mx.profiler.set_state(state='run')
 =======
         kv.set_server_profiler_config(file='server.json', profile_all=True)
+=======
+        kv.set_server_profiler_config(filename='server.json', profile_all=True)
+>>>>>>> filename debugging
         kv.set_server_profiler_state(state='run')
 >>>>>>> implemented args passing for profiler. need to debug segfault
 
