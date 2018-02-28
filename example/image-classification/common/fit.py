@@ -156,20 +156,11 @@ def fit(args, network, data_loader, **kwargs):
         kv.set_gradient_compression({'type': args.gc_type,
                                      'threshold': args.gc_threshold})
     if args.profile_server_file:
-<<<<<<< HEAD
-<<<<<<< HEAD
         kv.set_server_profiler_config(filename=args.profile_server_file, profile_all=True)
         kv.set_server_profiler_state(state='run')
     if args.profile_worker_file:
         mx.profiler.set_config(filename=args.profile_worker_file, profile_all=True)
         mx.profiler.set_state(state='run')
-=======
-        kv.set_server_profiler_config(file='server.json', profile_all=True)
-=======
-        kv.set_server_profiler_config(filename='server.json', profile_all=True)
->>>>>>> filename debugging
-        kv.set_server_profiler_state(state='run')
->>>>>>> implemented args passing for profiler. need to debug segfault
 
     # logging
     head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
