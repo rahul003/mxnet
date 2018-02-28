@@ -147,7 +147,7 @@ struct dequantize_signum {
     const uint8_t mask = 1U << (7- (i & 7) );
     const uint8_t masked = *ch_ptr & mask;
    
-    // if bit set at that position is 0, set outval to -1 else to 1
+    // if bit at that position is 0, set outval to -1 else to 1
     *outval += (( masked == mask) * 2 ) - 1;
   }
 };
