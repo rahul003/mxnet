@@ -136,10 +136,12 @@ def add_fit_args(parser):
                        help='the epochs to ramp-up lr to scaled large-batch value')
     train.add_argument('--warmup-strategy', type=str, default='linear',
                        help='the ramping-up strategy for large batch sgd')
-    train.add_argument('--profile-worker-file', type=str, default='',
-                       help='profile workers actions into this file')
+    train.add_argument('--profile-worker-suffix', type=str, default='',
+                       help='profile workers actions into this file. During distributed training\
+                             filename saved will be rank1_ followed by this suffix')
     train.add_argument('--profile-server-file', type=str, default='',
-                       help='profile server actions into this file during distributed training')
+                       help='profile server actions into a file with name like rank1_ followed by this suffix \
+                             during distributed training')
     return train
 
 
@@ -158,8 +160,13 @@ def fit(args, network, data_loader, **kwargs):
     if args.profile_server_file:
         kv.set_server_profiler_config(filename=args.profile_server_file, profile_all=True)
         kv.set_server_profiler_state(state='run')
+
     if args.profile_worker_file:
-        mx.profiler.set_config(filename=args.profile_worker_file, profile_all=True)
+        if kv.num_workers > 1:
+            filename = 'rank' + str(kv.rank) + '_' + args.profile_worker_file
+        else:
+            filename = args.profile_worker_file
+        mx.profiler.set_config(filename=filename, profile_all=True)
         mx.profiler.set_state(state='run')
 
     # logging
@@ -178,7 +185,6 @@ def fit(args, network, data_loader, **kwargs):
                 logging.info('Batch [%d]\tSpeed: %.2f samples/sec', i,
                              args.disp_batches * args.batch_size / (time.time() - tic))
                 tic = time.time()
-
         return
 
     # load model
@@ -316,6 +322,7 @@ def fit(args, network, data_loader, **kwargs):
               epoch_end_callback=checkpoint,
               allow_missing=True,
               monitor=monitor)
+
     if args.profile_server_file:
         kv.set_server_profiler_state(state='stop')
     if args.profile_worker_file:
