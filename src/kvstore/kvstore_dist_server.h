@@ -157,7 +157,7 @@ class KVStoreDistServer {
 
   void CommandHandle(const ps::SimpleData& recved, ps::SimpleApp* app) {
     CommandType recved_type = static_cast<CommandType>(recved.head);
-    switch(recved_type) {
+    switch (recved_type) {
       case CommandType::kStopServer:
         exec_.Stop();
         break;
@@ -186,7 +186,7 @@ class KVStoreDistServer {
   }
 
   void ProcessServerProfilerCommands(KVStoreServerProfilerCommand type, const std::string& body) {
-    switch(type) {
+    switch (type) {
       case KVStoreServerProfilerCommand::kSetConfig:
         SetProfilerConfig(body.substr(0, body.size() - 1));
         break;
@@ -227,7 +227,7 @@ class KVStoreDistServer {
       cvals.push_back(cval);
     }
     MXSetProfilerConfig(elems.size(), &ckeys[0], &cvals[0]);
-    for (int i=0; i<ckeys.size(); i++) {
+    for (int i=0; i < ckeys.size(); i++) {
       delete[] ckeys[i];
       delete[] cvals[i];
     }
