@@ -25,7 +25,6 @@
 #ifndef MXNET_KVSTORE_KVSTORE_DIST_H_
 #define MXNET_KVSTORE_KVSTORE_DIST_H_
 #include <string>
-#include <sstream>
 #include <vector>
 #include <algorithm>
 #include <utility>
