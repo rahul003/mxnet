@@ -57,7 +57,7 @@ namespace kvstore {
     }
   }
 
-  enum KeyType {
+enum KeyType {
   kUndefinedKey = -1,
   kStringKey,
   kIntKey

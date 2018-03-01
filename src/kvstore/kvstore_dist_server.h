@@ -32,7 +32,7 @@
 #include <functional>
 #include <future>
 #include <vector>
-#include <mxnet/c_api.h>
+#include "mxnet/c_api.h"
 #include "profiler/profiler.h"
 #include "ps/ps.h"
 #include "mxnet/kvstore.h"
@@ -163,10 +163,11 @@ class KVStoreDistServer {
     } else if (recved_type == CommandType::kSetGradientCompression) {
       gradient_compression_->DecodeParams(recved.body);
     } else if (recved_type == CommandType::kSetProfilerParams) {
+      // last char is the type of profiler command
       KVStoreServerProfilerCommand profiler_command_type =
           static_cast<KVStoreServerProfilerCommand>(recved.body.back() - '0');
       if (profiler_command_type == KVStoreServerProfilerCommand::kSetConfig) {
-        SetProfileConfig(recved.body.substr(0, recved.body.size() - 1));
+        SetProfilerConfig(recved.body.substr(0, recved.body.size() - 1));
       } else if (profiler_command_type == KVStoreServerProfilerCommand::kState) {
         MXSetProfilerState(static_cast<int>(recved.body.front() - '0'));
       } else if (profiler_command_type == KVStoreServerProfilerCommand::kPause) {
@@ -185,7 +186,7 @@ class KVStoreDistServer {
     app->Response(recved);
   }
 
-  void SetProfileConfig(std::string params_str) {
+  void SetProfilerConfig(std::string params_str) {
     std::vector<std::string> elems;
     mxnet::kvstore::split(params_str, ',', std::back_inserter(elems));
     std::vector<const char*> ckeys;

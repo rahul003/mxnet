@@ -2006,7 +2006,7 @@ MXNET_DLL int MXKVStoreSendCommmandToServers(KVStoreHandle handle,
                                              const char* cmd_body);
 
 
-MXNET_DLL int MXKVStoreSetServerProfileConfig(KVStoreHandle handle,
+MXNET_DLL int MXKVStoreSetServerProfilerConfig(KVStoreHandle handle,
                                               int num_params, const char* const* keys, const char* const* vals);
 
 MXNET_DLL int MXKVStoreSetServerProfilerState(KVStoreHandle handle, int state);

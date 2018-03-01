@@ -176,7 +176,6 @@ void Profiler::DumpProfile(bool peform_cleanup) {
     SetContinuousProfileDump(false, 1.0f);
   }
   std::ofstream file;
-
   const bool first_pass = ++profile_dump_count_ == 1;
   const bool last_pass = peform_cleanup || !continuous_dump_;
   if (!first_pass && continuous_dump_) {
@@ -184,7 +183,6 @@ void Profiler::DumpProfile(bool peform_cleanup) {
   } else {
     file.open(filename_, std::ios::trunc|std::ios::out);
   }
-
   if (first_pass || !continuous_dump_) {
     file << "{" << std::endl;
     file << "    \"traceEvents\": [" << std::endl;

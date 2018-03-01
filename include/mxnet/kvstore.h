@@ -51,8 +51,6 @@ enum class KVStoreServerProfilerCommand {
  */
 class KVStore {
  public:
-
-
   /*! \brief virtual destructor */
   virtual ~KVStore() {}
 

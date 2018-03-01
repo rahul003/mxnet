@@ -1020,7 +1020,7 @@ int MXKVStoreSendCommmandToServers(KVStoreHandle handle,
   API_END();
 }
 
-int MXKVStoreSetServerProfileConfig(KVStoreHandle handle, int num_params,
+int MXKVStoreSetServerProfilerConfig(KVStoreHandle handle, int num_params,
                                     const char* const* keys, const char* const* vals) {
   API_BEGIN();
     std::ostringstream os;
