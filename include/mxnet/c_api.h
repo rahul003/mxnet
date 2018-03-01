@@ -2012,7 +2012,9 @@ MXNET_DLL int MXKVStoreSendCommmandToServers(KVStoreHandle handle,
  * \return 0 when success, -1 when failure happens
  */
 MXNET_DLL int MXKVStoreSetServerProfilerConfig(KVStoreHandle handle,
-                                              int num_params, const char* const* keys, const char* const* vals);
+                                               int num_params,
+                                               const char* const* keys,
+                                               const char* const* vals);
 
 /**
  * \brief Calls KVStore's method to set server profiler state
