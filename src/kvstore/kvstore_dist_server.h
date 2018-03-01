@@ -157,34 +157,55 @@ class KVStoreDistServer {
 
   void CommandHandle(const ps::SimpleData& recved, ps::SimpleApp* app) {
     CommandType recved_type = static_cast<CommandType>(recved.head);
-    if (recved_type == CommandType::kStopServer) {
-      exec_.Stop();
-    } else if (recved_type == CommandType::kSyncMode) {
-      sync_mode_ = true;
-    } else if (recved_type == CommandType::kSetGradientCompression) {
-      gradient_compression_->DecodeParams(recved.body);
-    } else if (recved_type == CommandType::kSetProfilerParams) {
-      // last char is the type of profiler command
-      KVStoreServerProfilerCommand profiler_command_type =
-          static_cast<KVStoreServerProfilerCommand>(recved.body.back() - '0');
-      if (profiler_command_type == KVStoreServerProfilerCommand::kSetConfig) {
-        SetProfilerConfig(recved.body.substr(0, recved.body.size() - 1));
-      } else if (profiler_command_type == KVStoreServerProfilerCommand::kState) {
-        MXSetProfilerState(static_cast<int>(recved.body.front() - '0'));
-      } else if (profiler_command_type == KVStoreServerProfilerCommand::kPause) {
-        MXProfilePause(static_cast<int>(recved.body.front() - '0'));
-      } else if (profiler_command_type == KVStoreServerProfilerCommand::kDump) {
-        MXDumpProfile(static_cast<int>(recved.body.front() - '0'));
-      }
-    } else {
-      // this uses value 0 for message id from frontend
-      // let the main thread to execute ctrl, which is necessary for python
-      exec_.Exec([this, recved]() {
-          CHECK(controller_);
-          controller_(recved.head, recved.body);
-        });
+    switch( recved_type ) {
+      case CommandType::kStopServer:
+        exec_.Stop();
+        break;
+      case CommandType::kSyncMode:
+        sync_mode_ = true;
+        break;
+      case CommandType::kSetGradientCompression:
+        gradient_compression_->DecodeParams(recved.body);
+        break;
+      case CommandType::kSetProfilerParams:
+        // last char is the type of profiler command
+        KVStoreServerProfilerCommand profiler_command_type =
+            static_cast<KVStoreServerProfilerCommand>(recved.body.back() - '0');
+        ProcessServerProfilerCommands(profiler_command_type, recved.body);
+        break;
+      case CommandType::kController:
+        // this uses value 0 for message id from frontend
+        // let the main thread to execute ctrl, which is necessary for python
+        exec_.Exec([this, recved]() {
+            CHECK(controller_);
+            controller_(recved.head, recved.body);
+          });
+        break;
+      default:
+        LOG(FATAL) << "Unknown command type "<<recved.head;
+        break;
     }
     app->Response(recved);
+  }
+
+  void ProcessServerProfilerCommands(KVStoreServerProfilerCommand type, const std::string& body) {
+    switch( type ) {
+      case KVStoreServerProfilerCommand::kSetConfig:
+        SetProfilerConfig(body.substr(0, body.size() - 1));
+        break;
+      case KVStoreServerProfilerCommand::kState:
+        MXSetProfilerState(static_cast<int>(body.front() - '0'));
+        break;
+      case KVStoreServerProfilerCommand::kPause:
+        MXProfilePause(static_cast<int>(body.front() - '0'));
+        break;
+      case KVStoreServerProfilerCommand::kDump:
+        MXDumpProfile(static_cast<int>(body.front() - '0'));
+        break;
+      default:
+        LOG(FATAL) << "Unsupported server profiler command type "
+                   << static_cast<int>(type);
+    }
   }
 
   void SetProfilerConfig(std::string params_str) {
@@ -198,12 +219,12 @@ class KVStoreDistServer {
     for (int i=0; i < elems.size(); i++) {
       std::vector<std::string> parts;
       mxnet::kvstore::split(elems[i], ':', std::back_inserter(parts));
-      CHECK_NOTNULL(parts[0].c_str());
-      CHECK_NOTNULL(parts[1].c_str());
+      CHECK(!parts[0].empty());
+      CHECK(!parts[1].empty());
       if (parts[0] == "filename") {
         parts[1] = "rank" + std::to_string(ps::MyRank()) + "_" + parts[1];
       }
-      char * ckey = new char[parts[0].length() + 1];
+      char* ckey = new char[parts[0].length() + 1];
       std::sprintf(ckey, "%s", parts[0].c_str());
       ckeys.push_back(ckey);
 

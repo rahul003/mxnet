@@ -39,6 +39,13 @@
 
 namespace mxnet {
 
+/*!
+ * \brief enum to denote types of commands kvstore sends to server regarding profiler
+ * kSetConfig sets profiler configs. Similar to mx.profiler.set_config()
+ * kState allows changing state of profiler to stop or run
+ * kPause allows pausing and resuming of profiler
+ * kDump asks profiler to dump output
+ */
 enum class KVStoreServerProfilerCommand {
   kSetConfig, kState, kPause, kDump
 };
@@ -366,8 +373,14 @@ class KVStore {
    */
   virtual void SendCommandToServers(int cmd_id, const std::string& cmd_body) { }
 
-  virtual void SetServerProfilerCommand(KVStoreServerProfilerCommand type,
-                                        const std::string params) {
+  /**
+   * \brief Sends server profiler commands to all server nodes
+   * Only the worker with rank=0 sends the command which will be received by all servers
+   * \param type ProfilerCommand type
+   * \param params parameters for that command in the form of a string
+   */
+  virtual void SetServerProfilerCommand(const KVStoreServerProfilerCommand type,
+                                        const std::string& params) {
     LOG(FATAL) << "compile with USE_DIST_KVSTORE=1 to use distributed kvstore";
   }
 
