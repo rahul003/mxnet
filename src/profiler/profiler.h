@@ -131,8 +131,9 @@ struct ProfileStat {
   size_t process_id_ = current_process_id();
 
   /*! \brief id of thread which operation run on */
-  std::thread::id thread_id_ = std::this_thread::get_id();  // Not yet seen a
-                                                            // case where this isn't valid
+  size_t thread_id_ = std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // thread getid returns a hex, hashing it to get a size_t
+  // Not yet seen a case where this isn't valid
 
   /*! \brief Sub-events (ie begin, end, etc.) */
   SubEvent items_[3];  // Don't use vector in order to avoid memory allocation
@@ -352,7 +353,7 @@ class Profiler {
   /*!
    * \brief Get the calculated device count (numb er of devices to track in profile data).
    * \return Device count
-   * \note Number of CPU's + Number of GPU's + One for CPU-Pinned
+   * \note Number of CPU's + Number of GPU's + One for CPU-Pinned + One for CPU-shared
    */
   size_t DeviceCount() const { return cpu_num_ + gpu_num_ + 2; }
 

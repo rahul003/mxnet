@@ -94,8 +94,10 @@ class KVStoreDist : public KVStoreLocal {
   }
 
   void SetServerProfilerCommand(KVStoreServerProfilerCommand type, const std::string params) override {
-    SendCommandToServers(static_cast<int>(CommandType::kSetProfilerParams),
-                         params + std::to_string(static_cast<int>(type)));
+    if (get_rank() == 0) {
+      SendCommandToServers(static_cast<int>(CommandType::kSetProfilerParams),
+                           params + std::to_string(static_cast<int>(type)));
+    }
   }
 
 

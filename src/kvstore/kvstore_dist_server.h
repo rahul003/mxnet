@@ -195,14 +195,20 @@ class KVStoreDistServer {
 
     for (int i=0; i < elems.size(); i++) {
       std::vector<std::string> parts;
+      if (ps::MyRank()) std::cout<<elems[i]<<std::endl;
       mxnet::kvstore::split(elems[i], ':', std::back_inserter(parts));
       CHECK_NOTNULL(parts[0].c_str());
       CHECK_NOTNULL(parts[1].c_str());
       if (parts[0] == "filename") {
         parts[1] = std::to_string(ps::MyRank()) + parts[1];
       }
-      ckeys.push_back(parts[0].c_str());
-      cvals.push_back(parts[1].c_str());
+      char * ckey = new char [parts[0].length()+1];
+      std::strcpy (ckey, parts[0].c_str());
+      ckeys.push_back(ckey);
+
+      char* cval = new char [parts[1].length()+1];
+      std::strcpy (cval, parts[1].c_str());
+      cvals.push_back(cval);
     }
     MXSetProfilerConfig(elems.size(), &ckeys[0], &cvals[0]);
   }

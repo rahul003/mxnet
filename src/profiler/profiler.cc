@@ -176,6 +176,7 @@ void Profiler::DumpProfile(bool peform_cleanup) {
     SetContinuousProfileDump(false, 1.0f);
   }
   std::ofstream file;
+
   const bool first_pass = ++profile_dump_count_ == 1;
   const bool last_pass = peform_cleanup || !continuous_dump_;
   if (!first_pass && continuous_dump_) {
@@ -183,10 +184,14 @@ void Profiler::DumpProfile(bool peform_cleanup) {
   } else {
     file.open(filename_, std::ios::trunc|std::ios::out);
   }
+//  file << "numrecords "<<num_records_emitted_ << " \n";
+//  file << "profiledumpcount"<<profile_dump_count_<< " \n";
+
   if (first_pass || !continuous_dump_) {
     file << "{" << std::endl;
     file << "    \"traceEvents\": [" << std::endl;
   }
+
 
   const size_t dev_num = DeviceCount();
 
@@ -213,11 +218,11 @@ void Profiler::DumpProfile(bool peform_cleanup) {
       CHECK_NOTNULL(_opr_stat);
       std::unique_ptr<ProfileStat> opr_stat(_opr_stat);  // manage lifecycle
       opr_stat->process_id_ = i;  // lie and set process id to be the device number
-      if (first_flag) {
-        first_flag = false;
-      } else {
+//      if (first_flag) {
+//        first_flag = false;
+//      } else {
         file << ",\n";
-      }
+//      }
       file << std::endl;
       opr_stat->EmitEvents(&file);
       ++num_records_emitted_;
