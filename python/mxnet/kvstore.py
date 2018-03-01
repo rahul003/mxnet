@@ -643,9 +643,9 @@ class KVStore(object):
         kk = kwargs.keys()
         vv = kwargs.values()
         check_call(_LIB.MXKVStoreSetServerProfilerConfig(self.handle,
-                                                        len(kwargs),
-                                                        c_str_array([key for key in kk]),
-                                                        c_str_array([str(val) for val in vv])))
+                                                         len(kwargs),
+                                                         c_str_array([key for key in kk]),
+                                                         c_str_array([str(val) for val in vv])))
 
     def set_server_profiler_state(self, state='stop'):
         """Set up the servers profiler state to 'run' or 'stop'.
@@ -657,7 +657,8 @@ class KVStore(object):
             be 'stop' or 'run'. Default is `stop`.
         """
         state2int = {'stop': 0, 'run': 1}
-        check_call(_LIB.MXKVStoreSetServerProfilerState(self.handle, ctypes.c_int(state2int[state])))
+        check_call(_LIB.MXKVStoreSetServerProfilerState(self.handle,
+                                                        ctypes.c_int(state2int[state])))
 
     def set_server_profiler_dump(self, finished=True):
         """Dump profile of kvstore servers and stop profiler. Use this to save profile
