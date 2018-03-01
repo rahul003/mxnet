@@ -157,7 +157,7 @@ class KVStoreDistServer {
 
   void CommandHandle(const ps::SimpleData& recved, ps::SimpleApp* app) {
     CommandType recved_type = static_cast<CommandType>(recved.head);
-    switch( recved_type ) {
+    switch(recved_type) {
       case CommandType::kStopServer:
         exec_.Stop();
         break;
@@ -169,9 +169,9 @@ class KVStoreDistServer {
         break;
       case CommandType::kSetProfilerParams:
         // last char is the type of profiler command
-        KVStoreServerProfilerCommand profiler_command_type =
-            static_cast<KVStoreServerProfilerCommand>(recved.body.back() - '0');
-        ProcessServerProfilerCommands(profiler_command_type, recved.body);
+        ProcessServerProfilerCommands(static_cast<KVStoreServerProfilerCommand>
+                                                  (recved.body.back() - '0'),
+                                      recved.body);
         break;
       case CommandType::kController:
         // this uses value 0 for message id from frontend
@@ -181,15 +181,12 @@ class KVStoreDistServer {
             controller_(recved.head, recved.body);
           });
         break;
-      default:
-        LOG(FATAL) << "Unknown command type "<<recved.head;
-        break;
     }
     app->Response(recved);
   }
 
   void ProcessServerProfilerCommands(KVStoreServerProfilerCommand type, const std::string& body) {
-    switch( type ) {
+    switch(type) {
       case KVStoreServerProfilerCommand::kSetConfig:
         SetProfilerConfig(body.substr(0, body.size() - 1));
         break;
@@ -202,9 +199,6 @@ class KVStoreDistServer {
       case KVStoreServerProfilerCommand::kDump:
         MXDumpProfile(static_cast<int>(body.front() - '0'));
         break;
-      default:
-        LOG(FATAL) << "Unsupported server profiler command type "
-                   << static_cast<int>(type);
     }
   }
 
@@ -225,14 +219,18 @@ class KVStoreDistServer {
         parts[1] = "rank" + std::to_string(ps::MyRank()) + "_" + parts[1];
       }
       char* ckey = new char[parts[0].length() + 1];
-      std::sprintf(ckey, "%s", parts[0].c_str());
+      std::snprintf(ckey, parts[0].length() + 1, "%s", parts[0].c_str());
       ckeys.push_back(ckey);
 
       char* cval = new char[parts[1].length() + 1];
-      std::sprintf(cval, "%s", parts[1].c_str());
+      std::snprintf(cval, parts[1].length() + 1, "%s", parts[1].c_str());
       cvals.push_back(cval);
     }
     MXSetProfilerConfig(elems.size(), &ckeys[0], &cvals[0]);
+    for (int i=0; i<ckeys.size(); i++) {
+      delete[] ckeys[i];
+      delete[] cvals[i];
+    }
   }
 
   void DataHandleEx(const ps::KVMeta& req_meta,
