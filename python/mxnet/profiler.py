@@ -99,7 +99,7 @@ def dump(finished=True):
         Indicates whether to stop statistic output (dumping) after this dump.
         Default is True
     """
-    fin = 1 if finished is True else False
+    fin = 1 if finished is True else 0
     check_call(_LIB.MXDumpProfile(fin))
 
 
