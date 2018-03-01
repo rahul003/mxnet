@@ -614,13 +614,14 @@ class KVStore(object):
             self.handle, mx_uint(head), c_str(body)))
 
     def set_server_profiler_config(self, **kwargs):
-        """Set up the configure of profiler for kvstore server
+        """Configures profiler for kvstore server processes
         (only accepts keyword arguments).
 
         Parameters
         ----------
         filename : string,
-            output file for profile data
+            output file for profile data.
+            given filename will be prepended with `rankx_` where x is the rank of server
         profile_all : boolean,
             all profile types enabled
         profile_symbolic : boolean,
