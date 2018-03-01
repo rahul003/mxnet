@@ -30,6 +30,7 @@
 #include <dmlc/logging.h>
 #include <dmlc/thread_group.h>
 #include <stack>
+#include <ps/ps.h>
 #include "./c_api_common.h"
 #include "../profiler/profiler.h"
 
