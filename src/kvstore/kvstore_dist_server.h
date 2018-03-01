@@ -127,7 +127,8 @@ class KVStoreDistServer {
   }
 
   ~KVStoreDistServer() {
-    profiler::Profiler::Get()->SetState(profiler::Profiler::ProfilerState(profiler::Profiler::kNotRunning));
+    profiler::Profiler::Get()->SetState(
+      profiler::Profiler::ProfilerState(profiler::Profiler::kNotRunning));
     delete ps_server_;
   }
 
@@ -202,12 +203,12 @@ class KVStoreDistServer {
       if (parts[0] == "filename") {
         parts[1] = "rank" + std::to_string(ps::MyRank()) + "_" + parts[1];
       }
-      char * ckey = new char [parts[0].length()+1];
-      std::strcpy (ckey, parts[0].c_str());
+      char * ckey = new char[parts[0].length() + 1];
+      std::sprintf(ckey, "%s", parts[0].c_str());
       ckeys.push_back(ckey);
 
-      char* cval = new char [parts[1].length()+1];
-      std::strcpy (cval, parts[1].c_str());
+      char* cval = new char[parts[1].length() + 1];
+      std::sprintf(cval, "%s", parts[1].c_str());
       cvals.push_back(cval);
     }
     MXSetProfilerConfig(elems.size(), &ckeys[0], &cvals[0]);
