@@ -142,6 +142,8 @@ def train(epochs, ctx):
     metric = mx.metric.Accuracy()
     loss = gluon.loss.SoftmaxCrossEntropyLoss()
 
+    params = net.collect_params()
+
     for epoch in range(epochs):
         tic = time.time()
         train_data.reset()
@@ -163,6 +165,12 @@ def train(epochs, ctx):
                 for L in Ls:
                     L.backward()
             trainer.step(batch.data[0].shape[0])
+
+            param = params.values()[0]
+            if param.grad_req is 'null':
+                logging.info("oh no")
+            logging.info(param.data(mx.gpu(0)).asnumpy().flatten().tolist()[6:10])
+
             metric.update(label, outputs)
             if opt.log_interval and not (i+1)%opt.log_interval:
                 name, acc = metric.get()
