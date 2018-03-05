@@ -400,7 +400,7 @@ class KVStoreDistServer {
                               const ps::KVMeta& req_meta,
                               const ps::KVPairs<real_t> &req_data,
                               ps::KVServer<real_t>* server) {
-    mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server](mxnet::RunContext ctx) {
+    //mxnet::Engine::Get()->PushSync([key, stored, req_meta, req_data, server](mxnet::RunContext ctx) {
        ps::KVPairs<real_t> response;
        CHECK(!stored.is_none()) << ps::MyRank() <<  " : init " << key << " first";
        auto len = stored.shape().Size();
@@ -409,8 +409,8 @@ class KVStoreDistServer {
        // TODO(mli) try to remove this CopyFrom
        response.vals.CopyFrom(static_cast<const float*>(stored.data().dptr_), len);
        server->Response(req_meta, response);
-     }, stored.ctx(), {stored.var()}, {},
-     mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("DefaultStorageResponse"));
+     //}, stored.ctx(), {stored.var()}, {},
+     //mxnet::FnProperty::kNormal, 0, PROFILER_MESSAGE("DefaultStorageResponse"));
   }
 
   void DataHandleCompressed(const ps::KVMeta& req_meta,
