@@ -213,8 +213,8 @@ class KVStoreDistServer {
     for (int i=0; i < elems.size(); i++) {
       std::vector<std::string> parts;
       mxnet::kvstore::split(elems[i], ':', std::back_inserter(parts));
-      CHECK(!parts[0].empty());
-      CHECK(!parts[1].empty());
+      CHECK(!parts[0].empty()) << "ProfilerConfig parameter is empty";
+      CHECK(!parts[1].empty()) << "ProfilerConfig value is empty for parameter "<< parts[0];
       if (parts[0] == "filename") {
         parts[1] = "rank" + std::to_string(ps::MyRank()) + "_" + parts[1];
       }

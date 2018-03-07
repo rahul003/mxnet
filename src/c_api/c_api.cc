@@ -1026,7 +1026,7 @@ int MXKVStoreSetServerProfilerConfig(KVStoreHandle handle,
                                      const char* const* vals) {
   API_BEGIN();
     std::ostringstream os;
-    for (mx_uint i = 0; i < num_params; ++i) {
+    for (int i = 0; i < num_params; ++i) {
       os << keys[i] << ":" << vals[i];
       if (i != num_params - 1) os << ",";
     }
