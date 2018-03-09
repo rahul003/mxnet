@@ -148,15 +148,17 @@ def get_data_iters(dataset, batch_size, num_workers=1, rank=0):
             train_data, val_data = get_imagenet_iterator(opt.data_dir, batch_size, opt.num_workers, 224, opt.dtype)
     elif dataset == 'dummy':
         if model_name == 'inceptionv3':
-            train_data, val_data = dummy_iterator(batch_size, (3, 299, 299))
+            train_data, val_data = dummy_iterator(batch_size, (3, 299, 299), opt.dtype)
         else:
-            train_data, val_data = dummy_iterator(batch_size, (3, 224, 224))
+            train_data, val_data = dummy_iterator(batch_size, (3, 224, 224), opt.dtype)
     return train_data, val_data
 
-def test(ctx, val_data):
+def test(ctx, val_data, dtype):
     metric.reset()
     val_data.reset()
     for batch in val_data:
+        if batch.data[0].dtype != np.dtype(dtype):
+            batch.data[0] = batch.data[0].astype(dtype)
         data = gluon.utils.split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
         label = gluon.utils.split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
         outputs = []
@@ -202,8 +204,10 @@ def train(opt, ctx):
         metric.reset()
         btic = time.time()
         for i, batch in enumerate(train_data):
-            data = gluon.utils.split_and_load(batch.data[0].astype(opt.dtype), ctx_list=ctx, batch_axis=0)
-            label = gluon.utils.split_and_load(batch.label[0].astype(opt.dtype), ctx_list=ctx, batch_axis=0)
+            if batch.data[0].dtype != np.dtype(opt.dtype):
+                batch.data[0] = batch.data[0].astype(opt.dtype)
+            data = gluon.utils.split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
+            label = gluon.utils.split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
             outputs = []
             Ls = []
             with ag.record():
@@ -235,15 +239,22 @@ def train(opt, ctx):
 def main():
     if opt.mode == 'symbolic':
         data = mx.sym.var('data')
+        if dtype == 'float32':
+            data = mx.sym.identity(data=data, name='id')
+        else:
+            if dtype == 'float16':
+                data = mx.sym.Cast(data=data, dtype=np.float16)
         out = net(data)
+        if dtype == 'float32':
+            out = mx.sym.Cast(data=out, dtype=np.float32)
         softmax = mx.sym.SoftmaxOutput(out, name='softmax')
         mod = mx.mod.Module(softmax, context=[mx.gpu(i) for i in range(num_gpus)] if num_gpus > 0 else [mx.cpu()])
         kv = mx.kv.create(opt.kvstore)
         train_data, val_data = get_data_iters(dataset, batch_size, kv.num_workers, kv.rank)
         mod.fit(train_data,
                 eval_data = val_data,
-                num_epoch=opt.epochs,
-                kvstore=kv,
+                num_epoch = opt.epochs,
+                kvstore = kv,
                 batch_end_callback = mx.callback.Speedometer(batch_size, max(1, opt.log_interval)),
                 epoch_end_callback = mx.callback.do_checkpoint('image-classifier-%s'% opt.model),
                 optimizer = 'sgd',
