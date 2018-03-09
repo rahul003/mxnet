@@ -353,7 +353,7 @@ class Profiler {
   /*!
    * \brief Get the calculated device count (numb er of devices to track in profile data).
    * \return Device count
-   * \note Number of CPU's + Number of GPU's + One for CPU-Pinned + One for CPU-shared
+   * \note Number of CPU's + Number of GPU's + One for CPU-Pinned
    */
   size_t DeviceCount() const { return cpu_num_ + gpu_num_ + 2; }
 
