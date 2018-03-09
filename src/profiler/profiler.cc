@@ -205,6 +205,7 @@ void Profiler::DumpProfile(bool peform_cleanup) {
   // If aggregate stats aren't enabled, this won't cause a locked instruction
   std::shared_ptr<AggregateStats> ptr_aggregate_stats = aggregate_stats_.get()
                                                         ? aggregate_stats_ : nullptr;
+  bool first_flag = !first_pass && !num_records_emitted_;
   for (uint32_t i = 0; i < dev_num; ++i) {
     DeviceStats &d = profile_stat[i];
     ProfileStat *_opr_stat;
@@ -212,7 +213,11 @@ void Profiler::DumpProfile(bool peform_cleanup) {
       CHECK_NOTNULL(_opr_stat);
       std::unique_ptr<ProfileStat> opr_stat(_opr_stat);  // manage lifecycle
       opr_stat->process_id_ = i;  // lie and set process id to be the device number
-      file << ",\n";
+      if (first_flag) {
+        first_flag = false;
+      } else {
+        file << ",\n";
+      }
       file << std::endl;
       opr_stat->EmitEvents(&file);
       ++num_records_emitted_;
@@ -226,7 +231,12 @@ void Profiler::DumpProfile(bool peform_cleanup) {
   ProfileStat *_profile_stat;
   while (general_stats_.opr_exec_stats_->try_dequeue(_profile_stat)) {
     CHECK_NOTNULL(_profile_stat);
-    file << ",";
+
+    if (first_flag) {
+      first_flag = false;
+    } else {
+      file << ",";
+    }
 
     std::unique_ptr<ProfileStat> profile_stat(_profile_stat);  // manage lifecycle
     CHECK_NE(profile_stat->categories_.c_str()[0], '\0') << "Category must be set";
