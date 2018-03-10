@@ -22,8 +22,8 @@ logging.basicConfig(level=logging.DEBUG)
 from common import find_mxnet
 from common import data, fit, modelzoo
 import mxnet as mx
-
-def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
+import numpy as np
+def get_fine_tune_model(symbol, arg_params, num_classes, layer_name, dtype='float32'):
     """
     symbol: the pre-trained network symbol
     arg_params: the argument parameters of the pre-trained model
@@ -33,10 +33,11 @@ def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
     all_layers = symbol.get_internals()
     net = all_layers[layer_name+'_output']
     net = mx.symbol.FullyConnected(data=net, num_hidden=num_classes, name='fc')
+    if dtype == 'float16':
+        net = mx.sym.Cast(data=net, dtype=np.float32)
     net = mx.symbol.SoftmaxOutput(data=net, name='softmax')
     new_args = dict({k:arg_params[k] for k in arg_params if 'fc' not in k})
     return (net, new_args)
-
 
 if __name__ == "__main__":
     # parse args
@@ -46,16 +47,24 @@ if __name__ == "__main__":
     data.add_data_args(parser)
     aug = data.add_data_aug_args(parser)
     parser.add_argument('--pretrained-model', type=str,
-                        help='the pre-trained model')
+                        help='the pre-trained model. can be prefix of local model files prefix \
+                        or a model name from common/modelzoo')
     parser.add_argument('--layer-before-fullc', type=str, default='flatten0',
                         help='the name of the layer before the last fullc layer')
+    parser.add_argument('--use-new', action='store_true')
+
     # use less augmentations for fine-tune
     data.set_data_aug_level(parser, 1)
     # use a small learning rate and less regularizations
-    parser.set_defaults(image_shape='3,224,224', num_epochs=30,
-                        lr=.01, lr_step_epochs='20', wd=0, mom=0)
+    parser.set_defaults(image_shape='3,224,224',
+                        num_epochs=30,
+                        lr=.01,
+                        lr_step_epochs='20',
+                        wd=0,
+                        mom=0)
 
     args = parser.parse_args()
+
 
     # load pretrained model
     dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -63,11 +72,23 @@ if __name__ == "__main__":
         args.pretrained_model, os.path.join(dir_path, 'model'))
     if prefix is None:
         (prefix, epoch) = (args.pretrained_model, args.load_epoch)
+
     sym, arg_params, aux_params = mx.model.load_checkpoint(prefix, epoch)
 
-    # remove the last fullc layer
-    (new_sym, new_args) = get_fine_tune_model(
-        sym, arg_params, args.num_classes, args.layer_before_fullc)
+
+    if not args.use_new:
+        # remove the last fullc layer
+        (new_sym, new_args) = get_fine_tune_model(sym, arg_params, args.num_classes,
+                                                  args.layer_before_fullc)
+    else:
+        # load network
+        from importlib import import_module
+        net = import_module('symbols.'+args.network)
+        sym = net.get_symbol(**vars(args))
+        print(sym)
+#        import pdb; pdb.set_trace()
+        (new_sym, new_args) = get_fine_tune_model(sym, arg_params, args.num_classes,
+                                                  args.layer_before_fullc, args.dtype)
 
     # train
     fit.fit(args        = args,
