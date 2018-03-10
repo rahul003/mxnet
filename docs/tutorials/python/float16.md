@@ -17,22 +17,30 @@ For the rest of this tutorial we assume we are using such Nvidia GPUs.
 
 ## Using the Symbol API
 
-MXNet's layers can generally work with any data type. Operators infer the datatype from input data and perform computation with that datatype.
-So to enable training or inference in float16, all we need to do is add a Cast layer before the first operator.
-In this tutorial we will build a model which trains imagenet data with a VGG-11 network.
-You can see the complete example in [train_imagenet.py](example/image-classification/train_imagenet.py) and the network defined in [vgg.py](example/image-classification/symbols/vgg.py).
+### Training
+
+MXNet's layers can generally work with any data type.
+Operators infer the data type from input data and perform computation with that data type.
+So to enable training or inference in float16, all we need to do is add a Cast layer before the first layer.
+In this section, let us walk through the changes required to allow training with float16 precision.
+We will be training a VGG11 network with Imagenet shaped dummy data in this example.
+The complete example is in [train_imagenet.py](example/image-classification/train_imagenet.py) and the network is defined in [vgg.py](example/image-classification/symbols/vgg.py).
+
+Firstly, we need to ensure that the data received by the network is of type float16.
+If the data iterator itself is producing float16 data, then we are set.
+If not, we can add a cast layer as the first layer of the network.
 
 ```python
 
-def get_feature(internal_layer, layers, filters, batch_norm = False, **kwargs):
+def get_feature(internel_layer, layers, filters, batch_norm = False, **kwargs):
     for i, num in enumerate(layers):
         for j in range(num):
-            internal_layer = mx.sym.Convolution(data = internal_layer, kernel=(3, 3), pad=(1, 1), num_filter=filters[i], name="conv%s_%s" %(i + 1, j + 1))
+            internel_layer = mx.sym.Convolution(data = internel_layer, kernel=(3, 3), pad=(1, 1), num_filter=filters[i], name="conv%s_%s" %(i + 1, j + 1))
             if batch_norm:
-                internal_layer = mx.symbol.BatchNorm(data=internal_layer, name="bn%s_%s" %(i + 1, j + 1))
-            internal_layer = mx.sym.Activation(data=internal_layer, act_type="relu", name="relu%s_%s" %(i + 1, j + 1))
-        internal_layer = mx.sym.Pooling(data=internal_layer, pool_type="max", kernel=(2, 2), stride=(2,2), name="pool%s" %(i + 1))
-    return internal_layer
+                internel_layer = mx.symbol.BatchNorm(data=internel_layer, name="bn%s_%s" %(i + 1, j + 1))
+            internel_layer = mx.sym.Activation(data=internel_layer, act_type="relu", name="relu%s_%s" %(i + 1, j + 1))
+        internel_layer = mx.sym.Pooling(data=internel_layer, pool_type="max", kernel=(2, 2), stride=(2,2), name="pool%s" %(i + 1))
+    return internel_layer
 
 def get_classifier(input_data, num_classes, **kwargs):
     flatten = mx.sym.Flatten(data=input_data, name="flatten")
@@ -45,79 +53,54 @@ def get_classifier(input_data, num_classes, **kwargs):
     fc8 = mx.sym.FullyConnected(data=drop7, num_hidden=num_classes, name="fc8")
     return fc8
 
-class SyntheticDataIter(DataIter):
-    def __init__(self, num_classes, data_shape, max_iter, dtype):
-        self.batch_size = data_shape[0]
-        self.cur_iter = 0
-        self.max_iter = max_iter
-        self.dtype = dtype
-        label = np.random.randint(0, num_classes, [self.batch_size,])
-        data = np.random.uniform(-1, 1, data_shape)
-        self.data = mx.nd.array(data, dtype=self.dtype, ctx=mx.Context('cpu_pinned', 0))
-        self.label = mx.nd.array(label, dtype=self.dtype, ctx=mx.Context('cpu_pinned', 0))
-    def __iter__(self):
-        return self
-    @property
-    def provide_data(self):
-        return [mx.io.DataDesc('data', self.data.shape, self.dtype)]
-    @property
-    def provide_label(self):
-        return [mx.io.DataDesc('softmax_label', (self.batch_size,), self.dtype)]
-    def next(self):
-        self.cur_iter += 1
-        if self.cur_iter <= self.max_iter:
-            return DataBatch(data=(self.data,),
-                             label=(self.label,),
-                             pad=0,
-                             index=None,
-                             provide_data=self.provide_data,
-                             provide_label=self.provide_label)
-        else:
-            raise StopIteration
-    def __next__(self):
-        return self.next()
-    def reset(self):
-        self.cur_iter = 0
+# vgg11 spec
+layers, filters = ([1, 1, 2, 2, 2], [64, 128, 256, 512, 512])
 
-def get_benchmark_data_iterators(batch_size):
-    image_shape = (3,224,224)
-    data_shape = (batch_size,) + image_shape
-    train = SyntheticDataIter(args.num_classes, data_shape,
-            args.num_examples / args.batch_size, np.float32)
-    return (train, None)
+data = mx.sym.Variable(name="data")
+if dtype == 'float16':
+    data = mx.sym.Cast(data=data, dtype=np.float16)
+feature = get_feature(data, layers, filters, batch_norm)
+classifier = get_classifier(feature, num_classes)
+if dtype == 'float16':
+    out = mx.sym.Cast(data=out, dtype=np.float32)
+symbol = mx.sym.SoftmaxOutput(data=out, name='softmax')
 
-def fit(batch_size, gpus=None):
-    kv = mx.kvstore.create('local')
-    # if you have gpus change this to 'device'
-
-    # data iterators
-    (train, val) = get_benchmark_data_iterators(batch_size)
-    if args.test_io:
-
-    # devices for training
-    devs = mx.cpu()
-
-    # create model
-    model = mx.mod.Module(
-        context=devs,
-        symbol=network
-    )
-
-    optimizer_params = {
-        'learning_rate': 0.01,
-        'lr_scheduler': lr_scheduler,
-        'multi_precision': True}
-
-    # evaluation metrices
-    eval_metrics = ['accuracy']
-
-    # run
-    model.fit(train,
-              num_epoch=1,
-              eval_data=val,
-              kvstore='device',
-              allow_missing=True)
 ```
 
 
-<!-- INSERT SOURCE DOWNLOAD BUTTONS -->
+### Fine tuning a model trained in float32
+
+This requires the pre-trained symbol to support fp16. If we load a symbol trained with float32, then it would continue to use
+
+## Using Gluon API
+
+### Training
+
+We need to take care of two things to convert a model to support float16.
+Gluon Blocks have a cast method which casts parameters and changes the types of input expected.
+This is not all though, we still need to ensure that data input to the block is in the form of float16.
+This can be done by casting the data to float16. If the iterator supports generating data in float16 representation, we are set.
+Else, we need to cast the data generated by data iterator.
+An example of this can be seen in [example/gluon/image_classification.py](example/gluon/image_classification.py).
+
+```python
+for i, batch in enumerate(train_data):
+    if batch.data[0].dtype != np.dtype(opt.dtype):
+        batch.data[0] = batch.data[0].astype(opt.dtype)
+    data = gluon.utils.split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
+    label = gluon.utils.split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
+    ...
+```
+
+
+### Fine tuning
+
+Looks like we can just cast the block we load. Need to test it
+
+
+## Things to keep in mind
+- MXNET_CUDNN_AUTOTUNE_DEFAULT
+- Batch size
+- Model size
+- SGEMM kernels
+
