@@ -153,12 +153,12 @@ def get_data_iters(dataset, batch_size, num_workers=1, rank=0):
             train_data, val_data = dummy_iterator(batch_size, (3, 224, 224), opt.dtype)
     return train_data, val_data
 
-def test(ctx, val_data, dtype):
+def test(ctx, val_data):
     metric.reset()
     val_data.reset()
     for batch in val_data:
-        if batch.data[0].dtype != np.dtype(dtype):
-            batch.data[0] = batch.data[0].astype(dtype)
+        if batch.data[0].dtype != np.dtype(opt.dtype):
+            batch.data[0] = batch.data[0].astype(opt.dtype)
         data = gluon.utils.split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
         label = gluon.utils.split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
         outputs = []
