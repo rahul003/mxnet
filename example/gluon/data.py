@@ -88,6 +88,32 @@ def get_imagenet_iterator(root, batch_size, num_workers, data_shape=224, dtype='
     val_data = DataLoader(val_dataset, batch_size, last_batch='keep', num_workers=num_workers)
     return DataLoaderIter(train_data, dtype), DataLoaderIter(val_data, dtype)
 
+def get_caltech256_iterator(data_train, data_val, image_shape, data_nthreads, batch_size, nworker=1, rank=0):
+    train = mx.io.ImageRecordIter(
+        path_imgrec         = data_train,
+        label_width         = 1,
+        data_name           = 'data',
+        label_name          = 'softmax_label',
+        data_shape          = image_shape,
+        batch_size          = batch_size,
+        fill_value          = 127,
+        preprocess_threads  = data_nthreads,
+        shuffle             = True,
+        num_parts           = nworker,
+        part_index          = rank)
+    val = mx.io.ImageRecordIter(
+        path_imgrec         = data_val,
+        label_width         = 1,
+        data_name           = 'data',
+        label_name          = 'softmax_label',
+        batch_size          = batch_size,
+        data_shape          = image_shape,
+        preprocess_threads  = data_nthreads,
+        rand_crop           = False,
+        rand_mirror         = False,
+        num_parts           = nworker,
+        part_index          = rank)
+    return (train, val)
 
 class DummyIter(mx.io.DataIter):
     def __init__(self, batch_size, data_shape, batches = 100, dtype='float32'):
