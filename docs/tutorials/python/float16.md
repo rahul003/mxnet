@@ -30,47 +30,13 @@ Firstly, we need to ensure that the data received by the network is of type floa
 If the data iterator itself is producing float16 data, then we are set.
 If not, we can add a cast layer as the first layer of the network.
 
-```python
-
-def get_feature(internel_layer, layers, filters, batch_norm = False, **kwargs):
-    for i, num in enumerate(layers):
-        for j in range(num):
-            internel_layer = mx.sym.Convolution(data = internel_layer, kernel=(3, 3), pad=(1, 1), num_filter=filters[i], name="conv%s_%s" %(i + 1, j + 1))
-            if batch_norm:
-                internel_layer = mx.symbol.BatchNorm(data=internel_layer, name="bn%s_%s" %(i + 1, j + 1))
-            internel_layer = mx.sym.Activation(data=internel_layer, act_type="relu", name="relu%s_%s" %(i + 1, j + 1))
-        internel_layer = mx.sym.Pooling(data=internel_layer, pool_type="max", kernel=(2, 2), stride=(2,2), name="pool%s" %(i + 1))
-    return internel_layer
-
-def get_classifier(input_data, num_classes, **kwargs):
-    flatten = mx.sym.Flatten(data=input_data, name="flatten")
-    fc6 = mx.sym.FullyConnected(data=flatten, num_hidden=4096, name="fc6")
-    relu6 = mx.sym.Activation(data=fc6, act_type="relu", name="relu6")
-    drop6 = mx.sym.Dropout(data=relu6, p=0.5, name="drop6")
-    fc7 = mx.sym.FullyConnected(data=drop6, num_hidden=4096, name="fc7")
-    relu7 = mx.sym.Activation(data=fc7, act_type="relu", name="relu7")
-    drop7 = mx.sym.Dropout(data=relu7, p=0.5, name="drop7")
-    fc8 = mx.sym.FullyConnected(data=drop7, num_hidden=num_classes, name="fc8")
-    return fc8
-
-# vgg11 spec
-layers, filters = ([1, 1, 2, 2, 2], [64, 128, 256, 512, 512])
-
-data = mx.sym.Variable(name="data")
-if dtype == 'float16':
-    data = mx.sym.Cast(data=data, dtype=np.float16)
-feature = get_feature(data, layers, filters, batch_norm)
-classifier = get_classifier(feature, num_classes)
-if dtype == 'float16':
-    out = mx.sym.Cast(data=out, dtype=np.float32)
-symbol = mx.sym.SoftmaxOutput(data=out, name='softmax')
-
-```
-
+But softmax requires fp32, so cast it back at the end.
 
 ### Fine tuning a model trained in float32
 
-This requires the pre-trained symbol to support fp16. If we load a symbol trained with float32, then it would continue to use
+This requires the pre-trained symbol to support fp16.
+If we load a symbol trained with float32, then it would continue to expect float32.
+We need to create the same model as used to train the model, and add cast layers to use float16 input.
 
 ## Using Gluon API
 
@@ -95,12 +61,17 @@ for i, batch in enumerate(train_data):
 
 ### Fine tuning
 
-Looks like we can just cast the block we load. Need to test it
+Looks like we can just cast the block we load. Need to test it. Segfaults.
 
 
 ## Things to keep in mind
-- MXNET_CUDNN_AUTOTUNE_DEFAULT
-- Batch size
-- Model size
-- SGEMM kernels
+- Setting the environment variable MXNET_CUDNN_AUTOTUNE_DEFAULT to 2 can help run tests to pick the fastest convolution algorithm at runtime.
+Refer [Environment variables in MXNet](env_var.md) for more details.
+- Batch size: It's recommended to use batch sizes which are multiples of 8, as Nvidia's Tensor Cores perform best when dimensions of inputs are multiples of 8.
+- Model size: For smaller models like when training Resnet50 for Cifar10, most matrices involved in the computation can not benefit from Tensor cores.
+Training on a single GPU with float16 in such a case can thus even be slower than training with float32.
+- When training using multiple GPUs, reduced communication times with float16 also contribute to improved performance.
+- You can check whether your program is using Tensor cores for fast float16 computation by profiling with `nvprof`.
+Operations with `s884cudnn` in their names represent the use of Tensor cores.
+
 
