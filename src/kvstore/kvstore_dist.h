@@ -106,7 +106,7 @@ class Executor2 {
     std::condition_variable cond_;
   };
 
-  /**
+/**
  * \brief distributed kvstore
  *
  * it's the server node's job to control the data consistency among all
@@ -150,6 +150,8 @@ class KVStoreDist : public KVStoreLocal {
     if (IsServerNode()) {
       CHECK_NOTNULL(server_)->set_updater(updater);
     } else {
+      LOG(INFO) << "setting updater";
+      exec_.Start();
       updater_ = updater;
     }
   }
@@ -201,7 +203,7 @@ class KVStoreDist : public KVStoreLocal {
         ps::kWorkerGroup + ps::kServerGroup + ps::kScheduler);
     }
     if (server_) server_->Run();
-    else exec_.Start();
+
     // if there's a server started then worker should run this to receive compressed gradients
 
     ps::Finalize(0, true);
