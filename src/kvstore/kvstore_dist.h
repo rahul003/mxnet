@@ -246,7 +246,7 @@ class KVStoreDist : public KVStoreLocal {
         send_buf = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_, true, grouped_vals[i][0]->dtype());
       }
       if (gradient_compression_->get_type() == CompressionType::kNone) {
-        auto pull_from_servers = [key, recv_buf, send_buf](
+        auto pull_from_servers = [this, key, recv_buf, send_buf](
         RunContext rctx, Engine::CallbackOnComplete cb) {
           // convert to ps keys
           size_t size = recv_buf.shape().Size();
@@ -279,7 +279,7 @@ class KVStoreDist : public KVStoreLocal {
 
         bool pull_done = first_pull_done_[key];
        
-        auto pull_from_servers = [key, send_buf, recv_buf, recv_compr_buf, pull_done](
+        auto pull_from_servers = [this, key, send_buf, recv_buf, recv_compr_buf, pull_done](
         RunContext rctx, Engine::CallbackOnComplete cb) {
           int cmd;
           size_t size;
