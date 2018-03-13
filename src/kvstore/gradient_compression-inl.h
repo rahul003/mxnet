@@ -214,118 +214,6 @@ void Dequantize2BitKernelLaunch(mshadow::Stream<xpu> *s,
   });
 }
 
-struct quantize_logk {
-  MSHADOW_XINLINE static void Map(int out_block_id,   // id of parallel kernel
-                                  int num_blocks,
-                                  int block_size,     // number of output floats to process by each call
-                                  int original_size,
-                                  int num_workers,
-                                  int num_bits,
-                                  float *out,         // size = num_blocks * block_size
-                                  int *sum) {
-    // this call is responsible for quantizing values into block_size number of 32bit locations
-    // if `b` bits are being used for a single gradient value, then it is guaranteed that
-    // `32*block_size` is divisible by `b`. so the number of values in the original sum array that this call
-    // is responsible for is equal to `32 * block_size / b`
-
-    float *compr_float = out + (out_block_id * block_size);
-    // number of sum values to be processed by this kernel call are
-    // (out_block_id * block_size)/num_bits
-
-    bool is_last = (out_block_id == num_blocks - 1);
-    int num_prev_elems = 0;
-    if (out_block_id != 0) {
-      num_prev_elems = (out_block_id - 1) * block_size;
-    }
-
-    for (int i = 0; i < block_size; i++, compr_float++) {
-      *compr_float = 0;
-
-      // inclusive
-      int st_pos = 0;
-      // including
-      int end_pos = num_bits - 1;
-
-      // this will be incremented four times to cover the full float
-      unsigned char *byte_ptr = reinterpret_cast < unsigned char * > (compr_float);
-      while ((end_pos < block_size * 32) &&
-             (!is_last || (is_last && num_prev_elems < original_size ))) {
-        uint8_t s = (uint8_t) *(sum++);
-        num_prev_elems++;
-
-        if (st_pos / 8 == end_pos / 8) {
-          // doesn't cross byte boundary
-          *(byte_ptr) |= s << (8 - num_bits);
-        } else {
-          int bits_remaining = 8 - (end_pos % 8 + 1);
-          // shift by num_bits - bits_remaining, so that bits_remaining is when the value starts
-          *(byte_ptr++) |= s >> (num_bits - bits_remaining);
-          *(byte_ptr) |= s << (8 - num_bits + bits_remaining);
-        }
-        st_pos += num_bits;
-        end_pos += num_bits;
-
-        if (st_pos % 8 == 0) byte_ptr++;
-      }
-    }
-  }
-};
-
-struct dequantize_logk {
-  MSHADOW_XINLINE static void Map(int compr_block_id,   // id of parallel kernel
-                                  int num_blocks,
-                                  int block_size,     // number of compressed floats to process by each call
-                                  int original_size,
-                                  int num_workers,
-                                  int num_bits,
-                                  float threshold,
-                                  float *out,
-                                  float *compr) {
-    //TODO check endianness
-    float *compr_float = compr + compr_block_id;
-    bool is_last = (compr_block_id == num_blocks - 1);
-    int num_prev_elems = 0;
-    if (compr_block_id != 0) {
-      num_prev_elems = (compr_block_id - 1) * block_size;
-    }
-
-    // inclusive
-    int st_pos = 0;
-    // including
-    int end_pos = num_bits - 1;
-    uint8_t bitmask = (0x01 << num_bits) - 1;
-    for (int i = 0; i < block_size; i++, compr_float++) {
-      *compr_float = 0;
-      unsigned char *byte_ptr = reinterpret_cast < unsigned char * > (compr_float);
-      while ((end_pos < block_size * 32) &&
-             (!is_last || (is_last && num_prev_elems < original_size ))) {
-        if (end_pos / 8 == st_pos / 8) {
-          int curval = *byte_ptr;
-          curval >>= (8 - (end_pos % 8) - 1);
-          curval &= bitmask;
-          *(out++) = ( curval - num_workers) * threshold;
-        } else {
-//          uint8_t curval = ((*byte_ptr) >> (8 - (end_pos % 8) - 1));
-          uint8_t num_bits_overflowed = (end_pos + 1) % 8;
-          // left shift bits into position
-          uint8_t curval = *(byte_ptr++) << num_bits_overflowed;
-          curval &= bitmask;
-          // now bring next byte bits here
-          // TODO confirm byteptr is unaffected
-          curval |= (*byte_ptr >> (8 - num_bits_overflowed));
-          *(out++) = (curval - num_workers) * threshold;
-        }
-        num_prev_elems++;
-
-        st_pos += num_bits;
-        end_pos += num_bits;
-
-        if (st_pos % 8 == 0) byte_ptr++;
-      }
-    }
-  }
-};
-
 struct quantize_majority {
   MSHADOW_XINLINE static void Map(int out_byte_id,
                                   int original_size,
@@ -363,27 +251,7 @@ inline void QuantizeFromIntSumKernelLaunch(mshadow::Stream<xpu> *s,
                                            const int num_workers,
                                            const int original_size,
                                            const CompressionType type) {
-  if (type == CompressionType::kLogK) {
-    int block_size = lcm(num_workers, 32) / 32;
-    // each block is responsible for block_size number of floats into which compressed data is packed
-
-    // number of bits used for each value
-    int num_bits = (int) ceil(log2(float(2 * num_workers + 1)));
-
-    if (num_bits > 8) {
-      LOG(FATAL) << "Gradient compression unsupported for this type and number of workers right now";
-    }
-    mxnet::op::mxnet_op::Kernel<quantize_logk, xpu>
-    ::Launch(s,
-             (inputs[1].Size()) / block_size,   // number of parallel kernels, one for each block
-             (inputs[1].Size()) / block_size, // number of blocks
-             block_size,               // number of output floats (32bits) to process for each kernel call
-             original_size,            // original size
-             num_workers,              // num_workers
-             num_bits,                 // num_bits
-             inputs[1].dptr<float>(),  // to compressed array
-             inputs[0].dptr<int>());   // from int array
-  } else if (type == CompressionType::kMajority) {
+  if (type == CompressionType::kMajority) {
     mxnet::op::mxnet_op::Kernel<quantize_majority, xpu>
     ::Launch(s,
              inputs[1].Size() * 4,         // one for each byte (upto 8 values)
@@ -393,36 +261,6 @@ inline void QuantizeFromIntSumKernelLaunch(mshadow::Stream<xpu> *s,
   } else {
     LOG(FATAL) << "Unsupported quantization";
   }
-}
-template<typename xpu>
-inline void DequantizeKernelLaunch(mshadow::Stream<xpu> *s,
-                             const std::vector<mxnet::TBlob> &inputs,
-                             const float threshold,
-                             const int num_workers,
-                             const int original_size, const CompressionType type) {
-
-  int block_size = lcm(num_workers, 32) / 32;
-
-  // number of bits used for each value
-  int num_bits = (int) ceil(log2(float(2 * num_workers + 1)));
-  CHECK_LE(num_bits, 8);
-
-  if (type == CompressionType::kLogK) {
-    mxnet::op::mxnet_op::Kernel<dequantize_logk, xpu>
-    ::Launch(s,
-             (inputs[0].Size())/block_size,   // number of parallel kernels, one for each block
-             (inputs[0].Size())/block_size,   // number of blocks
-             block_size,               // number of output floats (32bits) to process for each kernel call
-             original_size,            // original size
-             num_workers,              // num_workers
-             num_bits,                 // num_bits
-             threshold,
-             inputs[1].dptr<float>(),  // original sized array
-             inputs[0].dptr<float>());   // compressed array
-  } else {
-    LOG(FATAL) << "Unsupported dequantization";
-  }
-
 }
 
 // TODO merge below and verify compilation on gpu
@@ -439,9 +277,6 @@ void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxne
 
 void DequantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s,
                           const std::vector<mxnet::TBlob> &inputs);
-
-void DequantizeImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
-                        const float threshold, const int num_workers, const CompressionType type);
 
 inline void Quantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
                              const std::vector<mxnet::TBlob> &inputs,
@@ -472,14 +307,6 @@ inline void Dequantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,
 inline void DequantizeSignumImpl(mshadow::Stream<mshadow::cpu> *s,
                                  const std::vector<mxnet::TBlob> &inputs) {
     DequantizeSignumKernelLaunch(s, inputs);
-}
-
-inline void DequantizeImpl(mshadow::Stream<mshadow::cpu> *s,
-                               const std::vector<mxnet::TBlob> &inputs,
-                               const float threshold,
-                               const int num_workers,
-                               const CompressionType type) {
-  DequantizeKernelLaunch(s, inputs, threshold, num_workers, inputs[1].Size(), type);
 }
 
 }  // namespace kvstore

@@ -73,8 +73,6 @@ void GradientCompression::SetParams(const std::vector<std::pair<std::string, std
 
   if (params.recompress_type == "majority") {
     recompress_type_ = CompressionType::kMajority;
-  } else if (params.recompress_type == "logk") {
-    recompress_type_ = CompressionType::kLogK;
   } else {
     LOG(FATAL) << "Unknown type for recompress type in gradient compression " << params.recompress_type;
   }
@@ -152,9 +150,7 @@ int64_t GradientCompression::GetCompressedSize(const int64_t original_size) {
 }
 
 int64_t GradientCompression::GetRecompressedSize(const int64_t original_size) {
-  if (recompress_type_ == CompressionType::kLogK) {
-      return ceil((original_size * ceil(log2(2 * num_workers_ + 1))) / 32);
-  } else if (recompress_type_ == CompressionType::kMajority) {
+  if (recompress_type_ == CompressionType::kMajority) {
     return GetCompressedSize(original_size);
   }
   LOG(FATAL) << "Unsupported compression type: " << get_recompress_type_str();
@@ -163,17 +159,11 @@ int64_t GradientCompression::GetRecompressedSize(const int64_t original_size) {
 
 // returns number of floats in requantized data Block for logk
 int GradientCompression::GetRequantizeBlockSize(const int num_workers) {
-  if (recompress_type_ == CompressionType::kLogK) {
-    return lcm(num_workers, 32) / 32;
-  } else {
-    return 1;
-  }
+  return 1;
 }
 
 int GradientCompression::GetRequantizeNumBits(const int num_workers) {
-  if (recompress_type_ == CompressionType::kLogK) {
-    return (int) ceil(log2((2 * num_workers + 1)));
-  } else if (recompress_type_ == CompressionType::kMajority) {
+  if (recompress_type_ == CompressionType::kMajority) {
     return 1;
   } else {
     LOG(FATAL) << "Check recompress type";
@@ -254,7 +244,7 @@ void GradientCompression::Quantize(const mxnet::NDArray &from,
     LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
 #endif
     }
-  } else if (type == CompressionType::kLogK || type == CompressionType::kMajority) {
+  } else if (type == CompressionType::kMajority) {
     const int num_workers = num_workers_;
     CHECK_GT(num_workers, 0);
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
@@ -353,32 +343,6 @@ void GradientCompression::Dequantize(const mxnet::NDArray &from,
       } else {
         LOG(FATAL) << "unknown device mask";
       }
-#else
-      LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
-#endif
-    }
-  } else if (type == CompressionType::kLogK ) {
-    const int num_workers = num_workers_;
-    CHECK_GT(num_workers, 0);
-    if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
-      mxnet::Engine::Get()->PushSync([from, to, threshold, num_workers, type](mxnet::RunContext ctx) {
-       std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
-       DequantizeImpl(ctx.get_stream<mshadow::cpu>(), inputs, threshold, num_workers, type);
-       }, from.ctx(), {from.var()}, {to->var()},
-      mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DequantizeCPU"));
-    } else {
-#if MXNET_USE_CUDA
-      if (a == mshadow::gpu::kDevMask && b == mshadow::gpu::kDevMask) {
-      mxnet::Engine::Get()->PushSync([from, to, threshold, num_workers, type](mxnet::RunContext ctx) {
-        std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
-        DequantizeImpl(ctx.get_stream<mshadow::gpu>(), inputs, threshold, num_workers, type);
-        // Wait GPU kernel to complete
-        ctx.get_stream<mshadow::gpu>()->Wait();
-      }, from.ctx(), {from.var()}, {to->var()},
-      mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("DequantizeGPU"));
-    } else {
-      LOG(FATAL) << "unknown device mask";
-    }
 #else
       LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
 #endif
