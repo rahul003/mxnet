@@ -372,7 +372,6 @@ class KVStoreDist : public KVStoreLocal {
           // issue pull
           CHECK_NOTNULL(ps_worker_)->ZPull(
           pskv.keys, vals, &pskv.lens, cmd, [vals, cb]() { delete vals; cb(); });
-//          std::cout << "executed compressed pull of type " << cmd << std::endl;
 
         };
         CHECK_NOTNULL(Engine::Get())->PushAsync(

@@ -329,7 +329,6 @@ struct dequantize_logk {
 struct quantize_majority {
   MSHADOW_XINLINE static void Map(int out_byte_id,
                                   int original_size,
-                                  int num_majority,
                                   float *out,
                                   int *intsum) {
     float *compr_block = out + (out_byte_id >> 2);
@@ -343,7 +342,8 @@ struct quantize_majority {
     int* g = intsum + start;
     uint8_t mask = 1U << 7;
     for (int i = start; i < end; i++) {
-      if (*g++ >= num_majority) {
+      // if sum is greater than 0, implies majority is positive
+      if (*g++ >= 0) {
         *block_ptr |= mask;
       }
       mask >>= 1;
@@ -378,12 +378,10 @@ inline void QuantizeFromIntSumKernelLaunch(mshadow::Stream<xpu> *s,
              inputs[1].dptr<float>(),  // to compressed array
              inputs[0].dptr<int>());   // from int array
   } else if (type == CompressionType::kMajority) {
-    int num_majority = int(ceil((float) num_workers / 2));
     mxnet::op::mxnet_op::Kernel<quantize_majority, xpu>
     ::Launch(s,
              inputs[1].Size() * 4,         // compressed size
              original_size,            // original size
-             num_majority,              // num_workers
              inputs[1].dptr<float>(),  // to compressed array
              inputs[0].dptr<int>());   // from int array
   } else {
