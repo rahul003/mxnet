@@ -91,6 +91,11 @@ parser.add_argument('--save-frequency', default=10, type=int,
                     help='epoch frequence to save model, best model will always be saved')
 parser.add_argument('--kvstore', type=str, default='device',
                     help='kvstore to use for trainer/module.')
+parser.add_argument('--gc-type', type=str, default='',
+                    help='type of gradient compression to use for distributed training')
+parser.add_argument('--gc-recompr-type', type=str, default='majority',
+                    help='type of compression done by kvstore server when '\ 
+                         'combining grads from each worker')
 parser.add_argument('--log-interval', type=int, default=50,
                     help='Number of batches to wait before logging.')
 parser.add_argument('--profile', action='store_true',
@@ -186,6 +191,9 @@ def train(opt, ctx):
     if isinstance(ctx, mx.Context):
         ctx = [ctx]
     kv = mx.kv.create(opt.kvstore)
+    if opt.gc_type:
+        kv.set_gradient_compression({'type': opt.gc_type, 'recompress_type': opt.gc_recompr_type})
+
     train_data, val_data = get_data_iters(dataset, batch_size, kv.num_workers, kv.rank)
     net.collect_params().reset_ctx(ctx)
     trainer = gluon.Trainer(net.collect_params(), 'sgd',
