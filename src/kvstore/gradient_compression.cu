@@ -58,25 +58,5 @@ void DequantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s,
     DequantizeSignumKernelLaunch(s, inputs);
 }
 
-//template<>
-//void DequantizeSignumKernelLaunch<gpu>(mshadow::Stream<xpu> *s,
-//                                       const std::vector<mxnet::TBlob> &inputs,
-//                                       const DType to_remove) { // TODO remove hack
-//  mxnet::op::mxnet_op::Kernel<dequantize_signum, gpu>
-//  ::Launch(s,
-//           inputs[1].Size(),         // original size
-//           inputs[1].dptr<DType>(),  // out array
-//           inputs[0].dptr<float>());  // compressed array
-//}
-
-
-void DequantizeImpl(mshadow::Stream<mshadow::gpu> *s,
-                    const std::vector<mxnet::TBlob> &inputs,
-                    const float threshold,
-                    const int num_workers,
-                    const CompressionType type) {
-  DequantizeKernelLaunch(s, inputs, threshold, num_workers, inputs[1].Size(), type);
-}
-
 }  // namespace kvstore
 }  // namespace mxnet
