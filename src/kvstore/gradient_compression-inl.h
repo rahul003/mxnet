@@ -99,12 +99,12 @@ struct quantize_signum {
                                   const float beta, const float oneminusbeta) {
     float *compr_block = out + (out_byte_id >> 2);
     // start and end are indices in original grad array
-
     // by 4 into 32 = into 8
     const int start = out_byte_id << 3;
     const int end = (start + 8 <= original_size) ? start + 8 : original_size;
     // cast as char* to manipulate bits of float addresses
     unsigned char *block_ptr = reinterpret_cast < unsigned char * > (compr_block) + (out_byte_id & 3);
+    // set to 0 by default
     *block_ptr = 0;
     float* res = residual + start;
     float* g = grad + start;
@@ -331,22 +331,28 @@ struct quantize_majority {
                                   int original_size,
                                   float *out,
                                   int *intsum) {
+    // compr_block needs to store 8 values
+    // out_byte_id represents id for 8 values, divide it by 4 to get float id 
     float *compr_block = out + (out_byte_id >> 2);
-    // start and end are indices in original grad array
+    // start and end are indices in intsum array
     // by 4 into 32 = into 8
     const int start = out_byte_id << 3;
     const int end = (start + 8 <= original_size) ? start + 8 : original_size;
-    // cast as char* to manipulate bits of float addresses
+    // cast as char* to manipulate bits of float addressesi
+    // also increments compr_block by remainder of out_byte_id when divided by 4 
+    // this fetches appropriate block
     unsigned char *block_ptr = reinterpret_cast < unsigned char * > (compr_block) + (out_byte_id & 3);
     *block_ptr = 0;
     int* g = intsum + start;
+    // this mask checks whether MSB is 1
     uint8_t mask = 1U << 7;
     for (int i = start; i < end; i++) {
-      // if sum is greater than 0, implies majority is positive
+      // if intsum is greater than 0, implies majority is positive
+      // then set bit to 1
       if (*g++ >= 0) {
         *block_ptr |= mask;
       }
-      mask >>= 1;
+      mask >>= 1; // move mask to next bit
     }
   }
 };
@@ -380,7 +386,7 @@ inline void QuantizeFromIntSumKernelLaunch(mshadow::Stream<xpu> *s,
   } else if (type == CompressionType::kMajority) {
     mxnet::op::mxnet_op::Kernel<quantize_majority, xpu>
     ::Launch(s,
-             inputs[1].Size() * 4,         // compressed size
+             inputs[1].Size() * 4,         // one for each byte (upto 8 values)
              original_size,            // original size
              inputs[1].dptr<float>(),  // to compressed array
              inputs[0].dptr<int>());   // from int array
