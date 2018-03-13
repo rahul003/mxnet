@@ -138,7 +138,7 @@ def add_fit_args(parser):
     train.add_argument('--profile-worker-suffix', type=str, default='',
                        help='profile workers actions into this file. During distributed training\
                              filename saved will be rank1_ followed by this suffix')
-    train.add_argument('--profile-server-file', type=str, default='',
+    train.add_argument('--profile-server-suffix', type=str, default='',
                        help='profile server actions into a file with name like rank1_ followed by this suffix \
                              during distributed training')
     return train
@@ -156,15 +156,15 @@ def fit(args, network, data_loader, **kwargs):
     if args.gc_type != 'none':
         kv.set_gradient_compression({'type': args.gc_type,
                                      'threshold': args.gc_threshold})
-    if args.profile_server_file:
-        kv.set_server_profiler_config(filename=args.profile_server_file, profile_all=True)
+    if args.profile_server_suffix:
+        kv.set_server_profiler_config(filename=args.profile_server_suffix, profile_all=True)
         kv.set_server_profiler_state(state='run')
 
-    if args.profile_worker_file:
+    if args.profile_worker_suffix:
         if kv.num_workers > 1:
-            filename = 'rank' + str(kv.rank) + '_' + args.profile_worker_file
+            filename = 'rank' + str(kv.rank) + '_' + args.profile_worker_suffix
         else:
-            filename = args.profile_worker_file
+            filename = args.profile_worker_suffix
         mx.profiler.set_config(filename=filename, profile_all=True)
         mx.profiler.set_state(state='run')
 
@@ -322,7 +322,7 @@ def fit(args, network, data_loader, **kwargs):
               allow_missing=True,
               monitor=monitor)
 
-    if args.profile_server_file:
+    if args.profile_server_suffix:
         kv.set_server_profiler_state(state='stop')
-    if args.profile_worker_file:
+    if args.profile_worker_suffix:
         mx.profiler.set_state(state='stop')

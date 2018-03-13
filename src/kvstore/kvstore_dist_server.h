@@ -32,10 +32,10 @@
 #include <functional>
 #include <future>
 #include <vector>
-#include "mxnet/c_api.h"
-#include "profiler/profiler.h"
-#include "ps/ps.h"
-#include "mxnet/kvstore.h"
+#include <mxnet/c_api.h>
+#include <ps/ps.h>
+#include <mxnet/kvstore.h>
+#include "../profiler/profiler.h"
 #include "../operator/tensor/elemwise_binary_op-inl.h"
 #include "../operator/tensor/init_op.h"
 
