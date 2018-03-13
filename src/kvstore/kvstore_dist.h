@@ -61,9 +61,14 @@ class Executor2 {
         lk.unlock();
 
         if (blk.f) {
+          LOG(INFO) << "blk.f calling";
           blk.f(); blk.p->set_value();
+          LOG(INFO) << "done calling f";
         } else {
-          blk.p->set_value(); break;
+          blk.p->set_value(); 
+          LOG(INFO) << "not calling f";
+          break;
+          
         }
         lk.lock();
       }
@@ -151,7 +156,7 @@ class KVStoreDist : public KVStoreLocal {
       CHECK_NOTNULL(server_)->set_updater(updater);
     } else {
       LOG(INFO) << "setting updater";
-      exec_.Start();
+     // exec_.Start();
       updater_ = updater;
     }
   }
@@ -387,10 +392,13 @@ class KVStoreDist : public KVStoreLocal {
           }
           gradient_compression_->DequantizeFinal(recv_compr_buf, &decomp_buf, priority);
           if (updater_) {
-            exec_.Exec([this, key, decomp_buf, &stored]() {
+      //      LOG(INFO) << "About to exec updater";
+//            exec_.Exec([this, key, decomp_buf, &stored]() {
               CHECK(updater_);
               updater_(key, decomp_buf, &stored);
-            });
+        //      LOG(INFO) << "After updater_";
+  //          });
+	//    LOG(INFO) << "After Exec";
           } else {
             //todo check async logic
             // TODO check if copy needed
