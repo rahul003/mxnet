@@ -116,6 +116,8 @@ def test_sync_push_pull(options):
                         print('----------------')
                         print('diff:', diff)
                         print('----------------')
+                    else:
+                        print('worker '+str(kv.rank) + 'failed signum tests')
                     sys.exit(1)
     
     init_kv(options)
@@ -126,9 +128,7 @@ def test_sync_push_pull(options):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='test signum gradient compression')
-    parser.add_argument('--nworkers', type=int, default=4)
     parser.add_argument('--beta', type=float, default=0)
     parser.add_argument('--nrepeat', type=int, default=1)
     opt = parser.parse_args()
-    assert (opt.nworkers == kv.num_workers), ("num_workers given does not equal those launched", kv.num_workers, opt.nworkers)
     test_sync_push_pull(opt)
