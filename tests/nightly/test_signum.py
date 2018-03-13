@@ -123,7 +123,7 @@ def test_sync_push_pull(options):
     init_kv(options)
     check_compr_pull_before_push()
     check_compr_ones()
-    check_compr_random(options.nrepeat, options.nworkers)
+    check_compr_random(options.nrepeat, kv.num_workers)
     print('worker ' + str(kv.rank) + ' is done with signum compression tests')
 
 if __name__ == "__main__":
