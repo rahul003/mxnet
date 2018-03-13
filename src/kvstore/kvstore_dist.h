@@ -45,73 +45,6 @@ namespace mxnet {
 namespace kvstore {
 
 /**
- * \brief executor runs a function using the thread called \ref Start
- */
-class Executor2 {
-  public:
-    /**
-     * \brief start the executor
-     */
-    void Start() {
-      std::unique_lock<std::mutex> lk(mu_);
-      while (true) {
-        cond_.wait(lk, [this]{return !queue_.empty();});
-        Block blk = std::move(queue_.front());
-        queue_.pop();
-        lk.unlock();
-
-        if (blk.f) {
-          LOG(INFO) << "blk.f calling";
-          blk.f(); blk.p->set_value();
-          LOG(INFO) << "done calling f";
-        } else {
-          blk.p->set_value(); 
-          LOG(INFO) << "not calling f";
-          break;
-          
-        }
-        lk.lock();
-      }
-    }
-
-    /**
-     * \brief function
-     */
-    typedef std::function<void()> Func;
-
-    /**
-     * \brief let the thread called \ref Start to exec a function. threadsafe
-     */
-    void Exec(const Func& func) {
-      Block blk(func);
-      auto fut = blk.p->get_future();
-      {
-        std::lock_guard<std::mutex> lk(mu_);
-        queue_.push(std::move(blk));
-        cond_.notify_one();
-      }
-      fut.wait();
-    }
-
-    /**
-     * \brief stop the thread, threadsafe
-     */
-    void Stop() {
-      Exec(Func());
-    }
-
-  private:
-    struct Block {
-      explicit Block(const Func& func) : f(func), p(std::make_shared<std::promise<void>>()) { }
-      Func f;
-      std::shared_ptr<std::promise<void>> p;
-    };
-    std::queue<Block> queue_;
-    std::mutex mu_;
-    std::condition_variable cond_;
-  };
-
-/**
  * \brief distributed kvstore
  *
  * it's the server node's job to control the data consistency among all
@@ -155,8 +88,6 @@ class KVStoreDist : public KVStoreLocal {
     if (IsServerNode()) {
       CHECK_NOTNULL(server_)->set_updater(updater);
     } else {
-      LOG(INFO) << "setting updater";
-     // exec_.Start();
       updater_ = updater;
     }
   }
@@ -303,7 +234,6 @@ class KVStoreDist : public KVStoreLocal {
       auto& recv_buf = recv_buf_[key];
       auto& send_buf = send_buf_[key];
       auto& recv_compr_buf = recv_compr_buf_[key];
-
       const auto storage_type = grouped_vals[i][0]->storage_type();
       CHECK_EQ(storage_type, kDefaultStorage)
                << "Expected stype of value to be kDefaultStorage";
@@ -334,7 +264,6 @@ class KVStoreDist : public KVStoreLocal {
         pull_from_servers,
         pinned_ctx_,
         {},
-       // {send_buf.var()}, // TODO check if required
         {recv_buf.var(), send_buf.var()},
         FnProperty::kNormal,
         priority,
@@ -349,7 +278,7 @@ class KVStoreDist : public KVStoreLocal {
         }
 
         bool pull_done = first_pull_done_[key];
-
+       
         auto pull_from_servers = [this, key, send_buf, recv_buf, recv_compr_buf, pull_done](
         RunContext rctx, Engine::CallbackOnComplete cb) {
           int cmd;
@@ -357,7 +286,6 @@ class KVStoreDist : public KVStoreLocal {
           if (!pull_done) {
             cmd = static_cast<int>(DataHandleType::kCompressedInit);
             size = recv_buf.shape().Size();
-            first_pull_done_[key] = true;
           } else {
             cmd = static_cast<int>(DataHandleType::kCompressedPushPull);
             size = recv_compr_buf.shape().Size();
@@ -374,6 +302,7 @@ class KVStoreDist : public KVStoreLocal {
           pskv.keys, vals, &pskv.lens, cmd, [vals, cb]() { delete vals; cb(); });
 
         };
+        
         CHECK_NOTNULL(Engine::Get())->PushAsync(
         pull_from_servers,
         pinned_ctx_,
@@ -391,13 +320,8 @@ class KVStoreDist : public KVStoreLocal {
           }
           gradient_compression_->DequantizeFinal(recv_compr_buf, &decomp_buf, priority);
           if (updater_) {
-      //      LOG(INFO) << "About to exec updater";
-//            exec_.Exec([this, key, decomp_buf, &stored]() {
               CHECK(updater_);
               updater_(key, decomp_buf, &stored);
-        //      LOG(INFO) << "After updater_";
-  //          });
-	//    LOG(INFO) << "After Exec";
           } else {
             //todo check async logic
             // TODO check if copy needed
@@ -405,12 +329,12 @@ class KVStoreDist : public KVStoreLocal {
           }
           comm_->Broadcast(key, stored, grouped_vals[i], priority);
         } else {
-//          std::cout<<ps::MyRank()<<" pull not done. allocating stored for key "<<key<<std::endl;
           stored = NDArray(grouped_vals[i][0]->shape(), Context());
           CHECK(!stored.is_none());
           CopyFromTo(recv_buf, stored, priority);
           comm_->Broadcast(key, recv_buf, grouped_vals[i], priority);
         }
+        if (!first_pull_done_[key]) first_pull_done_[key] = true;
       }
     }
   }
@@ -880,7 +804,6 @@ class KVStoreDist : public KVStoreLocal {
     }
     return pskv;
   }
-  Executor2 exec_;
 
   /**
    * \brief for worker to push and pull data

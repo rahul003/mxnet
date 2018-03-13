@@ -156,7 +156,7 @@ template<typename xpu>
 void DequantizeSignumKernelLaunch(mshadow::Stream<xpu> *s,
                                   const std::vector<mxnet::TBlob> &inputs) {
   // TODO ensure inputs[1] is set to 0 if you want only dequantized value. else it accumulates to the given location
-  MSHADOW_TYPE_SWITCH(inputs[1].type_flag_, DType, {
+   MSHADOW_TYPE_SWITCH(inputs[1].type_flag_, DType, {
     mxnet::op::mxnet_op::Kernel<dequantize_signum, xpu>
     ::Launch(s,
              inputs[1].Size(),         // original size
