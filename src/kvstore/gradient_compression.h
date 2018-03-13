@@ -49,7 +49,7 @@ inline int lcm(int a, int b) {
 }
 
 enum class CompressionType {
-  kNone, kTwoBit, kSignum, kLogK, kMajority
+  kNone, kTwoBit, kSignum, kMajority
 };
 
 struct GradientCompressionParam : public dmlc::Parameter<GradientCompressionParam> {
