@@ -449,10 +449,11 @@ class KVStoreDistServer {
                             ps::KVServer<real_t>* server) {
 
     if (log_verbose_gc_) {
-      LOG(INFO) << "rank " << ps::MyRank() << ": Received request for " << req_meta.cmd
-                << (req_meta.push ? "compressed push" :
-                     ( static_cast<DataHandleType>(req_meta.cmd) == DataHandleType::kCompressedFullPull ?
-                        "full pull" : "compressed pull"));
+      std::cout << ps::MyRank() << " received request for " << req_meta.cmd << std::endl;
+//      LOG(INFO) << "rank " << ps::MyRank() << ": Received request for " << req_meta.cmd;
+//                << (req_meta.push ? "compressed push" :
+//                     ( static_cast<DataHandleType>(req_meta.cmd) == DataHandleType::kCompressedFullPull ?
+//                        "full pull" : "compressed pull"));
     }
 
     if (req_meta.push) {

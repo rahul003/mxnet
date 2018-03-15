@@ -181,7 +181,6 @@ class KVStoreDist : public KVStoreLocal {
     PSKV push;
     PSKV pull;
     PSKV full_pull;
-    int original_size;
   };
 
   /**
@@ -306,6 +305,7 @@ class KVStoreDist : public KVStoreLocal {
       auto& recv_buf = recv_buf_[key];
       auto& send_buf = send_buf_[key];
       auto& recv_compr_buf = recv_compr_buf_[key];
+
       const auto storage_type = grouped_vals[i][0]->storage_type();
       CHECK_EQ(storage_type, kDefaultStorage)
         << "Expected stype of value to be kDefaultStorage";
@@ -326,10 +326,10 @@ class KVStoreDist : public KVStoreLocal {
       bool full_pull = (gradient_compression_->get_server_compression_type() == CompressionType::kNone)
                        || !first_pull_done_[key];
 
-//      if (log_verbose_gc_) {
-//        LOG(INFO) << "rank "<< ps::MyRank() << ": Issuing a pull of type "
-//                  << (full_pull ? "FullPull" : "CompressedPull" ) << " for key " << key;
-//      }
+      if (log_verbose_gc_) {
+        LOG(INFO) << "rank "<< ps::MyRank() << ": Issuing a pull of type "
+                  << (full_pull ? "FullPull" : "CompressedPull" ) << " for key " << key;
+      }
 
       auto pull_from_servers = [this, key, send_buf, recv_buf, recv_compr_buf, full_pull](
       RunContext rctx, Engine::CallbackOnComplete cb) {
@@ -455,6 +455,8 @@ class KVStoreDist : public KVStoreLocal {
     // Init the small buffer and residual_ buffer for quantize
     if (compr_buf.is_none()) {
       compr_buf = NDArray(TShape{(int64_t) compressed_size}, merged.ctx(), false, merged.dtype());
+    }
+    if (res_buf.is_none()) {
       res_buf = NDArray(TShape{(int64_t) original_size},
                         merged.ctx(), false, merged.dtype());
       res_buf = 0;
@@ -541,8 +543,10 @@ class KVStoreDist : public KVStoreLocal {
   }
 
   void PushCompressed(int key, const NDArray& comm_buf, const NDArray& small_buf, const PSKV& pskv, int priority) {
+    LOG(INFO) << "Pushign compressed";
     auto push_to_servers =
       [this, key, pskv, small_buf](RunContext rctx, Engine::CallbackOnComplete cb) {
+        std::cout << " sending compressed push" << std::endl;
         size_t size = small_buf.shape().Size();
         real_t* data = small_buf.data().dptr<real_t>();
         // do push. false means no delete
@@ -564,6 +568,7 @@ class KVStoreDist : public KVStoreLocal {
   }
 
   void PushDefault(int key, const NDArray &send_buf, const PSKV& pskv, int priority) {
+    LOG(INFO) << "Pushign default";
     auto push_to_servers =
         [this, key, pskv, send_buf](RunContext rctx, Engine::CallbackOnComplete cb) {
           // convert to ps keys
@@ -718,20 +723,14 @@ class KVStoreDist : public KVStoreLocal {
    * Populates push, pull and full_pull pskv on first call
    */
   inline PSKV& EncodeCompressedKey(int key, size_t original_size, bool is_push, bool is_compressed = true) {
-
     mu_.lock();
     PSKV& pskv = (is_compressed && is_push) ? compr_ps_kv_[key].push :
                  ((is_compressed) ? compr_ps_kv_[key].pull : compr_ps_kv_[key].full_pull);
-    int prev_orig_size = compr_ps_kv_[key].original_size;
     mu_.unlock();
-
-    // represents size of data to be sent by worker
 
     size_t pull_compr_size = gradient_compression_->GetServerRecompressedSize(original_size);
     size_t pull_size = (is_compressed) ? pull_compr_size : original_size;
     if (!pskv.keys.empty()) {
-      CHECK_EQ(prev_orig_size, original_size)
-        << ps::MyRank() << ": Size of value for key can not change. For key " << key << std::endl;
       if (!is_push) {
         CHECK_EQ(static_cast<size_t >(pskv.size), pull_size)
           << ps::MyRank() <<": The value size can't be changed. is_push is "<<is_push
@@ -822,16 +821,11 @@ class KVStoreDist : public KVStoreLocal {
 
           full_pull_pskv.lens.push_back(part_orig);
           full_pull_pskv.size += part_orig;
-
-//          std::cout << push_part << " " << pull_part << " " << part_orig << std::endl;
         }
         CHECK_EQ(static_cast<size_t>(compr_pull_pskv.size), pull_compr_size);
         CHECK_EQ(static_cast<size_t>(full_pull_pskv.size), original_size);
         CHECK_EQ(compr_push_pskv.lens.size(), num_servers*2);
         // to check that sizes haven't changed for next operations on same key
-        mu_.lock();
-        compr_ps_kv_[key].original_size = original_size;
-        mu_.unlock();
         if (gradient_compression_->get_server_compression_type() == CompressionType::kNone) {
           CHECK_EQ(static_cast<size_t>(compr_pull_pskv.size), original_size);
         }

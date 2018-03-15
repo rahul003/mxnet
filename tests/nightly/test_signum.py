@@ -35,7 +35,7 @@ rate = 1
 shape = (2, 3)
 irregular_shape = (1241, 1211)
 big_shape = (1200, 1200)        # bigger than MXNET_KVSTORE_BIGARRAY_BOUND
-keys_shapes = [('1121', shape)]#, ('1122', big_shape), ('1211', shape)]
+keys_shapes = [('1121', irregular_shape)]#, ('1122', big_shape), ('1211', shape)]
 kv = mx.kv.create('dist_sync')
 
 def test_sync_push_pull(options):
@@ -55,6 +55,7 @@ def test_sync_push_pull(options):
             curval = val[0][0].asnumpy()[0]
             kv.push(k, mx.nd.ones(s) * 0.4)
             val2 = mx.nd.zeros(s)
+            mx.nd.waitall()
             kv.pull(k, val2)
             if options.recompress_type == 'majority':
                 newval = curval + (1 * rate)
