@@ -33,26 +33,20 @@ def check_diff_to_scalar(A, x, rank=None):
 
 rate = 1
 shape = (2, 3)
+irregular_shape = (1241, 1211)
 big_shape = (1200, 1200)        # bigger than MXNET_KVSTORE_BIGARRAY_BOUND
-keys_shapes = [('1121', shape)]#, ('121221', (10,3))]#, ('1122', big_shape)]
-pullinit_test_key_shape = [('12', big_shape)]
+keys_shapes = [('1121', shape)]#, ('1122', big_shape), ('1211', shape)]
 kv = mx.kv.create('dist_sync')
 
 def test_sync_push_pull(options):
     def init_kv(options):
-        kv.set_gradient_compression({'type': 'signum', 'beta':options.beta, 'recompress_type':'majority'})
+        kv.set_gradient_compression({'type': 'signum',
+                                     'beta':options.beta,
+                                     'server_compression_type':options.recompress_type})
         kv.set_optimizer(mx.optimizer.create('test', rescale_grad=rate))
         # init kv compression key
         for k,s in keys_shapes:
             kv.init(k, mx.nd.zeros(s))
-        for k,s in pullinit_test_key_shape:
-            kv.init(k, mx.nd.ones(s))
-
-    def check_compr_pull_before_push():
-        for k,s in pullinit_test_key_shape:
-            val = mx.nd.zeros(s)
-            kv.pull(k, val)
-            check_diff_to_scalar(val, 1)
 
     def check_compr_ones():
         for k,s in keys_shapes:
@@ -62,10 +56,13 @@ def test_sync_push_pull(options):
             kv.push(k, mx.nd.ones(s) * 0.4)
             val2 = mx.nd.zeros(s)
             kv.pull(k, val2)
-            newval = curval + (1 * rate)
+            if options.recompress_type == 'majority':
+                newval = curval + (1 * rate)
+            else:
+                newval = curval + (kv.num_workers * rate)
             check_diff_to_scalar(val2, newval)
 
-    def check_compr_random(nrepeat, nworker):
+    def check_compr_random_majority(nrepeat, nworker):
         # set a seed so all workers generate same data. knowing this helps
         # calculate expected value after pull
         start_seed = 0
@@ -73,10 +70,8 @@ def test_sync_push_pull(options):
             seeds = range(start_seed + nworker)
             start_seed += nworker
             grads = {}
-            grads_cpy = {}
             signs = {}
             majority = {}
-            num_majority = math.ceil(nworker/2)
             for k,s in keys_shapes:
                 grads[k] = []
                 signs[k] = np.zeros(s)
@@ -94,7 +89,7 @@ def test_sync_push_pull(options):
             
             # creates a copy because push changes grad because of assignment
             grads_cpy = dict(grads)
-            for k,s in keys_shapes:
+            for k, s in keys_shapes:
                 orig_val = mx.nd.zeros(s)
                 kv.pull(k, orig_val)
                 # print(orig_val)
@@ -104,31 +99,22 @@ def test_sync_push_pull(options):
                 diff = val - orig_val
                 try:
                     assert_almost_equal(diff.asnumpy(), majority[k])
-                except AssertionError:
+                except AssertionError as e:
                     if kv.rank == 0:
-                        print('key:',k)
-                        print('----------------')
-                        print('grads:', grads[k])
-                        print('----------------')
-                        print('majority:', majority[k])
-                        print('----------------')
-                        print('signs:', signs[k])
-                        print('----------------')
-                        print('diff:', diff)
-                        print('----------------')
-                    else:
-                        print('worker '+str(kv.rank) + 'failed signum tests')
-                    sys.exit(1)
-    
+                        e.args += ('key:', k, 'grads', grads[k], 'majority', majority[k], 'signs', signs[k], 'diff', diff)
+
     init_kv(options)
-    check_compr_pull_before_push()
     check_compr_ones()
-    check_compr_random(options.nrepeat, kv.num_workers)
+    # if options.recompress_type == 'majority':
+    #     check_compr_random_majority(options.nrepeat, kv.num_workers)
+    # elif options.recompress_type == 'none':
+    #     check_compr_random_norecompress(options.nrepeat, kv.num_workers)
     print('worker ' + str(kv.rank) + ' is done with signum compression tests')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='test signum gradient compression')
     parser.add_argument('--beta', type=float, default=0)
     parser.add_argument('--nrepeat', type=int, default=1)
+    parser.add_argument('--recompress-type', type=str, default='majority')
     opt = parser.parse_args()
     test_sync_push_pull(opt)

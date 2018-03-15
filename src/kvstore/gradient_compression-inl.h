@@ -126,7 +126,7 @@ void QuantizeSignumKernelLaunch(mshadow::Stream<xpu> *s, const std::vector<mxnet
                               const float beta) {
   mxnet::op::mxnet_op::Kernel<quantize_signum, xpu>
     ::Launch(s,
-            inputs[2].Size() * 4,         // compressed array size
+            inputs[2].Size() * 4,         // number of calls is each byte of compressed array
             inputs[0].Size(),         // original size
             inputs[2].dptr<float>(),  // compressed array
             inputs[0].dptr<float>(),  // original array
@@ -155,6 +155,7 @@ struct dequantize_signum {
 template<typename xpu>
 void DequantizeSignumKernelLaunch(mshadow::Stream<xpu> *s,
                                   const std::vector<mxnet::TBlob> &inputs) {
+  std::cout << "in dequantize kernel launch" <<  inputs[1].Size() << " " << inputs[0].Size() << std::endl;
   // TODO ensure inputs[1] is set to 0 if you want only dequantized value. else it accumulates to the given location
    MSHADOW_TYPE_SWITCH(inputs[1].type_flag_, DType, {
     mxnet::op::mxnet_op::Kernel<dequantize_signum, xpu>
@@ -162,7 +163,9 @@ void DequantizeSignumKernelLaunch(mshadow::Stream<xpu> *s,
              inputs[1].Size(),         // original size
              inputs[1].dptr<DType>(),  // out array
              inputs[0].dptr<float>());  // compressed array
+     std::cout << "at " << inputs[1].Size() << " " << *(inputs[1].dptr<DType>() + inputs[1].Size() - 1) << std::endl;
   });
+
 }
 
 struct dequantize_2bit {
@@ -187,13 +190,11 @@ struct dequantize_2bit {
     const uint8_t negmask = negbits[col];
     const uint8_t masked = *ch_ptr & mask;
     if (masked == mask) {
-      *outval = pos_threshold;
+      *outval += pos_threshold;
     } else if (masked == negmask) {
       // use posbits for mask as posbits are both 1s
       // then compare masked with negbits to see if only negbits were set
-      *outval = neg_threshold;
-    } else {
-      *outval = 0;
+      *outval += neg_threshold;
     }
   }
 };
@@ -248,7 +249,6 @@ struct quantize_majority {
 template<typename xpu>
 inline void QuantizeFromIntSumKernelLaunch(mshadow::Stream<xpu> *s,
                                            const std::vector<mxnet::TBlob> &inputs,
-                                           const int num_workers,
                                            const int original_size,
                                            const CompressionType type) {
   if (type == CompressionType::kMajority) {
@@ -270,7 +270,7 @@ void Quantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet:
 void QuantizeSignumImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
                         const float beta);
 void QuantizeFromIntSumImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
-                            const int num_workers, const CompressionType type);
+                            const CompressionType type);
 
 void Dequantize2BitImpl(mshadow::Stream<mshadow::gpu> *s, const std::vector<mxnet::TBlob> &inputs,
                         const void* threshold);
@@ -292,9 +292,8 @@ inline void QuantizeSignumImpl(mshadow::Stream<mshadow::cpu> *s,
 
 inline void QuantizeFromIntSumImpl(mshadow::Stream<mshadow::cpu> *s,
                                    const std::vector<mxnet::TBlob> &inputs,
-                                   const int num_workers,
                                    const CompressionType type) {
-  QuantizeFromIntSumKernelLaunch(s, inputs, num_workers, inputs[0].Size(), type);
+  QuantizeFromIntSumKernelLaunch(s, inputs, inputs[0].Size(), type);
 }
 
 inline void Dequantize2BitImpl(mshadow::Stream<mshadow::cpu> *s,

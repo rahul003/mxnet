@@ -370,6 +370,11 @@ class KVStore {
   virtual void SendCommandToServers(int cmd_id, const std::string& cmd_body) { }
 
   /**
+   * \brief sets sync mode for server and/or worker processes
+   */
+  virtual void SetSyncMode() { }
+
+  /**
    * \brief the prototype of a server controller
    */
   typedef std::function<void(int, const std::string&)> Controller;

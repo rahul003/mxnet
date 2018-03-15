@@ -53,6 +53,7 @@ DMLC_REGISTER_PARAMETER(GradientCompressionParam);
 
 GradientCompression::GradientCompression() {
   type_ = CompressionType::kNone;
+  server_compression_type_ = CompressionType::kNone;
 }
 
 void GradientCompression::SetParams(const std::vector<std::pair<std::string, std::string> >
@@ -61,9 +62,6 @@ void GradientCompression::SetParams(const std::vector<std::pair<std::string, std
   params.InitAllowUnknown(kwargs);
   CHECK_GT(params.threshold, 0) << "threshold must be greater than 0";
   if (params.type == "2bit") {
-    if (recompress_type_ == CompressionType::kNone || recompress_type_ == CompressionType::kMajority) {
-      LOG(FATAL) <<" Unsupported for now";
-    }
     SetTwoBitCompression(params.threshold);
   } else if (params.type == "signum") {
     SetSignumCompression(params.beta);
@@ -71,10 +69,22 @@ void GradientCompression::SetParams(const std::vector<std::pair<std::string, std
     LOG(FATAL) << "Unknown type for gradient compression " << params.type;
   }
 
-  if (params.recompress_type == "majority") {
-    recompress_type_ = CompressionType::kMajority;
+  if (params.server_compression_type == "majority") {
+    server_compression_type_ = CompressionType::kMajority;
+  } else if (params.server_compression_type == "none") {
+    server_compression_type_ = CompressionType::kNone;
   } else {
-    LOG(FATAL) << "Unknown type for recompress type in gradient compression " << params.recompress_type;
+    LOG(FATAL) << "Unknown type for recompress type in gradient compression " << params.server_compression_type;
+  }
+
+  if (params.compression_step == "gpu_after_aggregation") {
+    compression_step_ = CompressionStep::kGpuAfterAggregation;
+  } else if (params.compression_step == "cpu_after_aggregation") {
+    compression_step_ = CompressionStep::kCpuAfterAggregation;
+  } else if (params.compression_step == "gpu_before_aggregation") {
+    compression_step_ = CompressionStep::kGpuBeforeAggregation;
+  } else {
+    LOG(FATAL) << "Unknown compression step " << params.compression_step;
   }
 }
 
@@ -82,12 +92,24 @@ CompressionType GradientCompression::get_type() {
   return type_;
 }
 
+CompressionType GradientCompression::get_server_compression_type() {
+  return server_compression_type_;
+}
+
+CompressionStep GradientCompression::get_compression_step() {
+  return compression_step_;
+}
+
 std::string GradientCompression::get_type_str() {
   return std::to_string(static_cast<int>(type_));
 }
 
-std::string GradientCompression::get_recompress_type_str() {
-  return std::to_string(static_cast<int>(recompress_type_));
+std::string GradientCompression::get_server_compression_type_str() {
+  return std::to_string(static_cast<int>(server_compression_type_));
+}
+
+std::string GradientCompression::get_compression_step_str() {
+  return std::to_string(static_cast<int>(compression_step_));
 }
 
 void GradientCompression::SetTwoBitCompression(const float threshold) {
@@ -104,6 +126,7 @@ void GradientCompression::SetNumWorkers(const int num_workers) {
   num_workers_ = num_workers;
 }
 
+// Only encodes params that server needs
 std::string GradientCompression::EncodeParams() {
   using namespace std;  // to reduce length of next line
   string rval = get_type_str();
@@ -112,7 +135,7 @@ std::string GradientCompression::EncodeParams() {
   } else if (type_ == CompressionType::kSignum) {
     rval += "," + to_string(beta_);
   }
-  rval +=  "," + get_recompress_type_str();
+  rval +=  "," + get_server_compression_type_str();
   return rval;
 }
 
@@ -127,46 +150,58 @@ void GradientCompression::DecodeParams(const std::string &s) {
     beta_ = stof(elems[1]);
   }
   if (elems.size() > 2) {
-    recompress_type_ = static_cast<CompressionType>(stoi(elems[2]));
+    server_compression_type_ = static_cast<CompressionType>(stoi(elems[2]));
   }
 }
 
-int GradientCompression::GetCompressionFactor() {
-  if (type_ == CompressionType::kTwoBit) {
+int GradientCompression::GetCompressionFactor(const CompressionType& type) {
+  if (type == CompressionType::kTwoBit) {
     return 16;
-  } else if (type_ == CompressionType::kSignum) {
+  } else if (type == CompressionType::kSignum || type == CompressionType::kMajority) {
     return 32;
   } else {
-    LOG(FATAL) << "Unsupported compression type: " << get_type_str();
+    LOG(FATAL) << "Unknown compression type: " << static_cast<int>(type);
     return 0;
   }
 }
 
 int64_t GradientCompression::GetCompressedSize(const int64_t original_size) {
-  const int bits = GetCompressionFactor();
+  const int bits = GetCompressionFactor(type_);
   return ((original_size % bits == 0) ?
           original_size / bits :
           original_size / bits + 1);
 }
 
-int64_t GradientCompression::GetRecompressedSize(const int64_t original_size) {
-  if (recompress_type_ == CompressionType::kMajority) {
-    return GetCompressedSize(original_size);
+int64_t GradientCompression::GetCompressedSize(const CompressionType& type, const int64_t original_size) {
+  const int bits = GetCompressionFactor(type);
+  return ((original_size % bits == 0) ?
+          original_size / bits :
+          original_size / bits + 1);
+}
+
+int64_t GradientCompression::GetServerRecompressedSize(const int64_t original_size) {
+  if (server_compression_type_ == CompressionType::kMajority) {
+    return GetCompressedSize(server_compression_type_, original_size);
+  } else if (server_compression_type_ == CompressionType::kNone) {
+    return original_size;
+  } else {
+    LOG(FATAL) << "Unsupported compression type: " << get_server_compression_type_str();
   }
-  LOG(FATAL) << "Unsupported compression type: " << get_recompress_type_str();
   return 0;
 }
 
 // returns number of floats in requantized data Block for logk
-int GradientCompression::GetRequantizeBlockSize(const int num_workers) {
+int GradientCompression::GetServerCompressionBlockSize(const int num_workers) {
   return 1;
 }
 
-int GradientCompression::GetRequantizeNumBits(const int num_workers) {
-  if (recompress_type_ == CompressionType::kMajority) {
+int GradientCompression::GetServerCompressionNumBits(const int num_workers) {
+  if (server_compression_type_ == CompressionType::kMajority) {
     return 1;
+  } else if (server_compression_type_ == CompressionType::kNone) {
+    return 32;
   } else {
-    LOG(FATAL) << "Check recompress type";
+    LOG(FATAL) << "Check server compression type " << get_server_compression_type_str();
   }
 }
 
@@ -180,7 +215,7 @@ void GradientCompression::Quantize(const mxnet::NDArray &from,
 void GradientCompression::Requantize(const mxnet::NDArray &from,
                                    mxnet::NDArray *to,
                                    const int priority) {
-  Quantize(from, to, nullptr, priority, recompress_type_);
+  Quantize(from, to, nullptr, priority, server_compression_type_);
 }
 
 void GradientCompression::Quantize(const mxnet::NDArray &from,
@@ -245,20 +280,18 @@ void GradientCompression::Quantize(const mxnet::NDArray &from,
 #endif
     }
   } else if (type == CompressionType::kMajority) {
-    const int num_workers = num_workers_;
-    CHECK_GT(num_workers, 0);
     if (a == mshadow::cpu::kDevMask && b == mshadow::cpu::kDevMask) {
-      mxnet::Engine::Get()->PushSync([from, to, num_workers, type](mxnet::RunContext ctx) {
+      mxnet::Engine::Get()->PushSync([from, to, type](mxnet::RunContext ctx) {
          std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
-         QuantizeFromIntSumImpl(ctx.get_stream<mshadow::cpu>(), inputs, num_workers, type);
+         QuantizeFromIntSumImpl(ctx.get_stream<mshadow::cpu>(), inputs, type);
        }, from.ctx(), {from.var()}, {to->var()},
-       mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("QuantizeFromIntSumPU"));
+       mxnet::FnProperty::kNormal, priority, PROFILER_MESSAGE("QuantizeFromIntSumCPU"));
     } else {
 #if MXNET_USE_CUDA
       if (a == mshadow::gpu::kDevMask && b == mshadow::gpu::kDevMask) {
-        mxnet::Engine::Get()->PushSync([from, to, num_workers, type](mxnet::RunContext ctx) {
+        mxnet::Engine::Get()->PushSync([from, to, type](mxnet::RunContext ctx) {
           std::vector<mxnet::TBlob> inputs = {from.data(), to->data()};
-          QuantizeFromIntSumImpl(ctx.get_stream<mshadow::gpu>(), inputs, num_workers, type);
+          QuantizeFromIntSumImpl(ctx.get_stream<mshadow::gpu>(), inputs, type);
           // Wait GPU kernel to complete
           ctx.get_stream<mshadow::gpu>()->Wait();
         }, from.ctx(), {from.var()}, {to->var()},
@@ -283,10 +316,8 @@ void GradientCompression::Dequantize(const mxnet::NDArray &from, mxnet::NDArray 
 
 void GradientCompression::DequantizeFinal(const mxnet::NDArray &from, mxnet::NDArray *to,
                                      const int priority) {
-  if (recompress_type_ == CompressionType::kMajority) {
-    *to = 0;
-  } // logk automatically sets to 0 before storing dequantized values
-  Dequantize(from, to, priority, recompress_type_, threshold_);
+  *to = 0;
+  Dequantize(from, to, priority, server_compression_type_, threshold_);
 }
 
 template<typename T>

@@ -143,7 +143,11 @@ class KVStoreLocal : public KVStore {
   void SetGradientCompression(const std::vector<std::pair<std::string, std::string> >
                               & kwargs) override {
     gradient_compression_->SetParams(kwargs);
-    gradient_compression_->SetNumWorkers(ps::NumWorkers());
+    if (gradient_compression_->get_compression_step() != CompressionStep::kGpuBeforeAggregation) {
+      LOG(INFO) << "In the case of single machine, gradient compression can only be done "
+                << " on GPUs before aggregation. Setting compression step as gpu_before_aggregation";
+      gradient_compression_->set_compression_step(CompressionStep::kGpuBeforeAggregation);
+    }
   }
 
 private:
@@ -161,10 +165,6 @@ private:
   virtual void PushImpl(const std::vector<int>& keys,
                         const std::vector<NDArray>& values,
                         int priority) {
-    if ((gradient_compression_ != nullptr) && (gradient_compression_->get_type() != CompressionType::kNone)) {
-      return PushAllToAllImpl(keys, values, priority);
-    }
-
     std::vector<int> uniq_keys;
     std::vector<std::vector<NDArray> > grouped_vals;
     GroupKVPairsPush(keys, values, &uniq_keys, &grouped_vals);
@@ -201,67 +201,18 @@ private:
     }
   }
 
-
-  void PushAllToAllImpl(const std::vector<int>& keys,
-                        const std::vector<NDArray>& values,
-                        int priority) {
-    std::vector<int> uniq_keys;
-    std::vector<std::vector<NDArray> > grouped_vals;
-    GroupKVPairsPush(keys, values, &uniq_keys, &grouped_vals);
-    for (size_t i = 0; i < uniq_keys.size(); ++i) {
-      int key = uniq_keys[i];
-      comm_->Reduce(key, grouped_vals[i], priority);
-    }
-  }
-
-  void PullAllToAllImpl(const int key,
-                        std::vector<NDArray*>& grouped_vals,
-                        int priority) {
-      comm_->BroadcastRequantized(key, grouped_vals, priority);
-
-      if (local_on_gpus_[key].size() == 0) {
-        auto& local = local_[key];
-        local_on_gpus_[key].resize(grouped_vals.size());
-        for (int j = 0 ; j < grouped_vals.size(); j++) {
-          local_on_gpus_[key][j] = local.Copy(grouped_vals[j]->ctx());
-        }
-      }
-
-      if (updater_ != nullptr) {
-        for (int j = 0 ; j < grouped_vals.size(); j++) {
-          auto& local = local_on_gpus_[key][j];
-          CHECK(!local_on_gpus_[key][j].is_none()) << "key " << key << " has not been inited";
-          if (key_type_ == kStringKey && str_updater_ != nullptr) {
-            const std::string &str_key = reverse_str_key_dict_[key];
-            str_updater_(str_key, *grouped_vals[j],  &local);
-          } else {
-            updater_(key, *grouped_vals[j],  &local);
-          }
-          CHECK_EQ(local.ctx(), grouped_vals[j]->ctx());
-          CopyFromTo(local, grouped_vals[j], priority);
-        }
-      } else {
-        LOG(FATAL) << "not fixed yet";
-      }
-  }
-
   virtual void PullImpl(const std::vector<int>& keys,
                         const std::vector<NDArray*>& values,
                         int priority) {
-
     std::vector<int> uniq_keys;
     std::vector<std::vector<NDArray*> > grouped_vals;
     GroupKVPairsPull(keys, values, &uniq_keys, &grouped_vals);
+
     for (size_t i = 0; i < uniq_keys.size(); ++i) {
       int key = uniq_keys[i];
-      if ((gradient_compression_ != nullptr) && (gradient_compression_->get_type() != CompressionType::kNone) && first_pull_done_[key]) {
-        PullAllToAllImpl(key, grouped_vals[i], priority);
-      } else {
-        const NDArray& local = local_[key];
-        CHECK(!local.is_none()) << "key " << key << " has not been inited";
-        comm_->Broadcast(key, local, grouped_vals[i], priority);
-        first_pull_done_[key] = true;
-      }
+      const NDArray& local = local_[key];
+      CHECK(!local.is_none()) << "key " << key << " has not been inited";
+      comm_->Broadcast(key, local, grouped_vals[i], priority);
     }
   }
 
@@ -468,12 +419,10 @@ private:
   Context pinned_ctx_;
   /// \brief buffer for storing local values
   std::unordered_map<int, NDArray> local_;
-  std::unordered_map<int, std::vector<NDArray> > local_on_gpus_;
   /// key mapping for string -> integer
   std::unordered_map<std::string, int> str_key_dict_;
   /// reverse key mapping for integer -> string
   std::unordered_map<int, std::string> reverse_str_key_dict_;
-  std::unordered_map<int, bool> first_pull_done_;
   /// the next available integer for string->int key mapping
   int next_str_key_ = 0;
   /// whether printed warning due to mismatch stype in each key
