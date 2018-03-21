@@ -127,8 +127,6 @@ class KVStoreDistServer {
   }
 
   ~KVStoreDistServer() {
-    profiler::Profiler::Get()->SetState(
-      profiler::Profiler::ProfilerState(profiler::Profiler::kNotRunning));
     delete ps_server_;
   }
 
