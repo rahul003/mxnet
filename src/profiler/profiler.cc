@@ -205,7 +205,6 @@ void Profiler::DumpProfile(bool peform_cleanup) {
   // If aggregate stats aren't enabled, this won't cause a locked instruction
   std::shared_ptr<AggregateStats> ptr_aggregate_stats = aggregate_stats_.get()
                                                         ? aggregate_stats_ : nullptr;
-  bool first_flag = !first_pass && !num_records_emitted_;
   for (uint32_t i = 0; i < dev_num; ++i) {
     DeviceStats &d = profile_stat[i];
     ProfileStat *_opr_stat;
