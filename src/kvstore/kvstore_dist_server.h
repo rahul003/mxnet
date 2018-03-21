@@ -24,6 +24,9 @@
  */
 #ifndef MXNET_KVSTORE_KVSTORE_DIST_SERVER_H_
 #define MXNET_KVSTORE_KVSTORE_DIST_SERVER_H_
+#include <mxnet/c_api.h>
+#include <mxnet/kvstore.h>
+#include <ps/ps.h>
 #include <queue>
 #include <string>
 #include <mutex>
@@ -32,9 +35,6 @@
 #include <functional>
 #include <future>
 #include <vector>
-#include <mxnet/c_api.h>
-#include <ps/ps.h>
-#include <mxnet/kvstore.h>
 #include "../profiler/profiler.h"
 #include "../operator/tensor/elemwise_binary_op-inl.h"
 #include "../operator/tensor/init_op.h"

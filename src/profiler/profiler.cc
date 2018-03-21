@@ -213,12 +213,7 @@ void Profiler::DumpProfile(bool peform_cleanup) {
       CHECK_NOTNULL(_opr_stat);
       std::unique_ptr<ProfileStat> opr_stat(_opr_stat);  // manage lifecycle
       opr_stat->process_id_ = i;  // lie and set process id to be the device number
-      if (first_flag) {
-        first_flag = false;
-      } else {
-        file << ",\n";
-      }
-      file << std::endl;
+      file << ",\n" << std::endl;
       opr_stat->EmitEvents(&file);
       ++num_records_emitted_;
       if (ptr_aggregate_stats) {
@@ -231,13 +226,7 @@ void Profiler::DumpProfile(bool peform_cleanup) {
   ProfileStat *_profile_stat;
   while (general_stats_.opr_exec_stats_->try_dequeue(_profile_stat)) {
     CHECK_NOTNULL(_profile_stat);
-
-    if (first_flag) {
-      first_flag = false;
-    } else {
-      file << ",";
-    }
-
+    file << ",";
     std::unique_ptr<ProfileStat> profile_stat(_profile_stat);  // manage lifecycle
     CHECK_NE(profile_stat->categories_.c_str()[0], '\0') << "Category must be set";
     // Currently, category_to_pid_ is only accessed here, so it is protected by this->m_ above
