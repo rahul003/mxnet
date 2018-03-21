@@ -208,7 +208,7 @@ class KVStoreDistServer {
     ckeys.reserve(elems.size());
     cvals.reserve(elems.size());
 
-    for (int i=0; i < elems.size(); i++) {
+    for (size_t i=0; i < elems.size(); i++) {
       std::vector<std::string> parts;
       mxnet::kvstore::split(elems[i], ':', std::back_inserter(parts));
       CHECK(!parts[0].empty()) << "ProfilerConfig parameter is empty";
@@ -225,7 +225,7 @@ class KVStoreDistServer {
       cvals.push_back(cval);
     }
     MXSetProfilerConfig(elems.size(), &ckeys[0], &cvals[0]);
-    for (int i=0; i < ckeys.size(); i++) {
+    for (size_t i=0; i < ckeys.size(); i++) {
       delete[] ckeys[i];
       delete[] cvals[i];
     }
