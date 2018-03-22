@@ -159,6 +159,7 @@ class KVStoreDistServer {
     sync_mode_ = false;
     gradient_compression_ = std::make_shared<GradientCompression>();
     log_verbose_ = dmlc::GetEnv("MXNET_KVSTORE_DIST_ROW_SPARSE_VERBOSE", false);
+    mode_ = dmlc::GetEnv("MXNET_KVSTORE_FP16", 0);
   }
 
   ~KVStoreDistServer() {
@@ -230,20 +231,40 @@ class KVStoreDistServer {
                            ps::KVServer<char>* server) {
     if (merged->request.size() == (size_t) ps::NumWorkers()) {
       // let the main thread to execute updater_, which is necessary for python
-      if (updater_) {
-        exec_.Exec([this, key, merged, stored](){
-          CHECK(updater_);
-          updater_(key, merged->array, stored);
-        });
+
+      if (mode_ == 2) {
+        CopyFromTo(merged->array, merged->temp_array);
+        if (updater_) {
+          exec_.Exec([this, key, merged, stored](){
+            CHECK(updater_);
+            updater_(key, merged->temp_array, stored);
+          });
+        } else {
+          // if no updater, just copy
+          CopyFromTo(merged->temp_array, stored);
+        }
       } else {
-        // if no updater, just copy
-        CopyFromTo(merged->array, stored);
+        if (updater_) {
+          exec_.Exec([this, key, merged, stored](){
+            CHECK(updater_);
+            updater_(key, merged->array, stored);
+          });
+        } else {
+          // if no updater, just copy
+          CopyFromTo(merged->array, stored);
+        }
       }
+
+
+
+
       // better to cast once and store, than once for each pull
       // we don't need to wait on this because unlike recvd, stored wont go out of scope
       if (dtype != mshadow::kFloat32) {
-        auto& stored_dtype = store_[key].arr_dtype;
-        CopyFromTo(*stored, &stored_dtype, 0);
+        if (mode_ == 0 || mode_ == 2) {
+          auto& stored_dtype = store_[key].arr_dtype;
+          CopyFromTo(*stored, &stored_dtype, 0);
+        }
       }
       if (log_verbose_)  {
         LOG(INFO) << "sync response to " << merged->request.size() << " workers";
@@ -502,8 +523,9 @@ class KVStoreDistServer {
                               const ps::KVPairs<char> &req_data,
                               ps::KVServer<char>* server) {
     ps::KVPairs<char> response;
-    const NDArray& stored = (dtype == mshadow::kFloat32) ? store_[key].arr_fp32 :
-                                                           store_[key].arr_dtype;
+    // when mode is 1 it is actually in fp16
+    const NDArray& stored = (mode_ == 1 ? store_[key].arr_fp32 :
+                              (dtype == mshadow::kFloat32) ? store_[key].arr_fp32 : store_[key].arr_dtype);
     CHECK(!stored.is_none()) << "init " << key << " first";
     if (dtype != mshadow::kFloat32) {
       stored.WaitToRead();
@@ -610,13 +632,18 @@ class KVStoreDistServer {
       })
       NDArray recved = NDArray(recv_blob, 0);
       if (stored.is_none()) {
-        // initialization
-        // stored is real_t
-        stored = NDArray(dshape, Context(), false, mshadow::kFloat32);
-        if (type.dtype != mshadow::kFloat32) {
-          stored_dtype = NDArray(dshape, Context(), false, type.dtype);
-          // no need to wait on stored_dtype because stored will be in scope
+
+        if (mode_ == 0 || mode_ == 2) {
+          // initialization
+          // stored is real_t
+          stored = NDArray(dshape, Context(), false, mshadow::kFloat32);
+          if (type.dtype != mshadow::kFloat32) {
+            stored_dtype = NDArray(dshape, Context(), false, type.dtype);
+          }
+        } else {
+          stored = NDArray(dshape, Context(), false, type.dtype);
         }
+
         CopyFromTo(recved, &stored, 0);
         if (type.dtype != mshadow::kFloat32) {
           CopyFromTo(stored, &stored_dtype, 0);
@@ -626,20 +653,35 @@ class KVStoreDistServer {
       } else if (sync_mode_) {
         // synced push
         auto& merged = merge_buf_[key];
-        if (merged.array.is_none()) {
-          merged.array = NDArray(dshape, Context(), false, mshadow::kFloat32);
-          merged.temp_array = NDArray(dshape, Context(), false, mshadow::kFloat32);
-        }
-        if (merged.request.empty()) {
-          CopyFromTo(recved, merged.array);
-        } else {
-          if (type.dtype == mshadow::kFloat32) {
-            merged.array += recved;
+        if (mode_ == 0) {
+          if (merged.array.is_none()) {
+            merged.array = NDArray(dshape, Context(), false, mshadow::kFloat32);
+            merged.temp_array = NDArray(dshape, Context(), false, mshadow::kFloat32);
+          }
+          if (merged.request.empty()) {
+            CopyFromTo(recved, merged.array);
           } else {
-            CopyFromTo(recved, merged.temp_array);
-            merged.array += merged.temp_array;
+            if (type.dtype == mshadow::kFloat32) {
+              merged.array += recved;
+            } else {
+              CopyFromTo(recved, merged.temp_array);
+              merged.array += merged.temp_array;
+            }
+          }
+        } else {
+            if (merged.array.is_none()) {
+              merged.array = NDArray(dshape, Context(), false, type.dtype);
+              if (mode_ == 2) {
+                merged.temp_array = NDArray(dshape, Context(), false, mshadow::DataType<real_t>::kFlag);
+              }
+            }
+          if (merged.request.size() == 0) {
+            CopyFromTo(recved, merged.array);
+          } else {
+            merged.array += recved;
           }
         }
+
         merged.request.push_back(req_meta);
         ApplyUpdates(key, type.dtype, &merged, &stored, server);
       } else {
@@ -714,6 +756,7 @@ class KVStoreDistServer {
 
   // whether to LOG verbose information
   bool log_verbose_;
+  int mode_;
 
   /**
    * \brief gradient compression object.
