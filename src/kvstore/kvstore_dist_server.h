@@ -706,7 +706,7 @@ class KVStoreDistServer {
         }
 
         CopyFromTo(recved, &stored, 0);
-        if (type.dtype != mshadow::kFloat32) {
+        if (mode_ != 1 && type.dtype != mshadow::kFloat32) {
           CopyFromTo(stored, &stored_dtype, 0);
         }
         server->Response(req_meta);
