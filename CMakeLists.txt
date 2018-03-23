@@ -98,7 +98,7 @@ else(MSVC)
   check_cxx_compiler_flag("-std=c++0x"   SUPPORT_CXX0X)
   # For cross compilation, we can't rely on the compiler which accepts the flag, but mshadow will
   # add platform specific includes not available in other arches
-  if(USE_SSE STREQUAL AUTO)
+  if(USE_SSE STREQUAL "AUTO")
     check_cxx_compiler_flag("-msse2"     SUPPORT_MSSE2)
   else()
     set(SUPPORT_MSSE2 FALSE)
