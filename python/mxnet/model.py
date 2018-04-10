@@ -837,6 +837,8 @@ class FeedForward(BASE_ESTIMATOR):
         (kvstore, update_on_kvstore) = _create_kvstore(
             kvstore, len(self.ctx), self.arg_params)
 
+
+
         param_idx2name = {}
         if update_on_kvstore:
             param_idx2name.update(enumerate(param_names))

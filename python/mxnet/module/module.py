@@ -499,6 +499,12 @@ class Module(BaseModule):
         (kvstore, update_on_kvstore) = \
                 _create_kvstore(kvstore, len(self._context), self._arg_params)
 
+        if kvstore and self._compression_params:
+            kvstore.set_gradient_compression(self._compression_params)
+            if 'recompress_type' in self._compression_params and \
+                    (self._compression_params['recompress_type'] is not 'none'):
+                update_on_kvstore = False
+
         batch_size = self._exec_group.batch_size
         if kvstore and 'dist' in kvstore.type and '_sync' in kvstore.type:
             batch_size *= kvstore.num_workers
@@ -534,8 +540,6 @@ class Module(BaseModule):
         self._updater = None
 
         if kvstore:
-            if self._compression_params:
-                kvstore.set_gradient_compression(self._compression_params)
             if update_on_kvstore:
                 kvstore.set_optimizer(self._optimizer)
             # copy initialized local parameters to kvstore
