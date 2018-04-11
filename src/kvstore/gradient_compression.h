@@ -138,6 +138,7 @@ class GradientCompression {
    * reduces when using a particular type of compression
    */
   int GetCompressionFactor(const CompressionType& type);
+  int GetCompressionFactor();
 
   /*!
    * \brief returns the size of compressed gradients given an original sized gradient array
@@ -166,11 +167,11 @@ class GradientCompression {
 //   */
 //  int GetServerCompressionNumBits(const int num_workers);
 //
-//  /*!
-//   * \brief returns recompressed size after merging partially dequantized gradients from each worker
-//   * \param num_workers number of workers from whom gradients are being accumulated
-//   */
-//  int64_t GetServerRecompressedSize(const int64_t original_size);
+  /*!
+   * \brief returns recompressed size after merging partially dequantized gradients from each worker
+   * \param num_workers number of workers from whom gradients are being accumulated
+   */
+  int64_t GetServerRecompressedSize(const int64_t original_size);
 
   /*!
   * \brief Issues quantize operation to be scheduled by the engine

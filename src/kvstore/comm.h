@@ -436,8 +436,13 @@ class CommDevice : public Comm {
     // we don't do compression twice in dist_sync_device
     if ((gc_ != nullptr) && (gc_->get_type() != CompressionType::kNone)) {
       return ReduceCompressed(key, src, priority);
+    } else {
+      return ReduceDefault(key, src, priority);
     }
+  }
 
+  const NDArray& ReduceDefault(int key, const std::vector<NDArray>& src,
+                      int priority) {
     // avoid extra copy for single device, but it may bring problems for
     // abnormal usage of kvstore
     if (src.size() == 1) {

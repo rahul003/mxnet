@@ -143,6 +143,11 @@ class KVStoreLocal : public KVStore {
   void SetGradientCompression(const std::vector<std::pair<std::string, std::string> >
                               & kwargs) override {
     gradient_compression_->SetParams(kwargs);
+    if (gradient_compression_->get_compression_step() != CompressionStep::kGpuBeforeAggregation) {
+      LOG(INFO) << "In the case of single machine, gradient compression can only be done "
+                << " on GPUs before aggregation. Setting compression step as gpu_before_aggregation";
+      gradient_compression_->set_compression_step(CompressionStep::kGpuBeforeAggregation);
+    }
   }
 
  private:
