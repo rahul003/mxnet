@@ -311,6 +311,7 @@ class KVStoreDistServer {
       update_buf->request.clear();
       if (has_multi_precision_copy(type)) CopyFromTo(stored, store_[key]);
       stored.WaitToRead();
+      LOG(INFO) << "inited key "<<key << (void *) &stored;
       // reset needed for gradient compression
       if (reset_merged) update_buf->merged = 0;
     } else {
@@ -567,7 +568,7 @@ class KVStoreDistServer {
       if (has_multi_precision_copy(type)) store_[key].WaitToRead();
       response_arr = &store_[key];
       CHECK(!response_arr->is_none()) << "rank " << ps::MyRank() << " : "
-        << "Cannot handle pull before a push. Init key " << key << " first";
+        << "Cannot handle pull before a push. Init key " << key << " first " << (void *)&store_[key];
     } else {
       LOG(FATAL) << "Unexpected pull command to server "<<static_cast<int>(type.requestType);
     }
@@ -587,10 +588,9 @@ class KVStoreDistServer {
     CHECK_EQ(type.dtype, mshadow::kFloat32)
       << "Gradient compression is currently supported for fp32 only";
     if (req_meta.push) {
-      // there used several WaitToRead, this is because \a recved's memory
-      // could be deallocated when this function returns. so we need to make sure
-      // the operators with \a NDArray are actually finished
-
+      if (log_verbose_) {
+        LOG(INFO) << "rank: " << ps::MyRank() << " received compressed push";
+      }
       // first for dummy key which represents original size of array, whose len is 0
       CHECK_EQ(req_data.keys.size(), (size_t)2);
       CHECK_EQ(req_data.lens.size(), (size_t)2);
@@ -603,6 +603,12 @@ class KVStoreDistServer {
       TShape dshape(ds, ds + 1);
       TBlob recv_blob(reinterpret_cast<real_t*>(req_data.vals.data()), dshape, cpu::kDevMask);
       NDArray recved = NDArray(recv_blob, 0);
+
+//      std::string compressed;
+//      for(int i=0; i<recv_blob.Size(); i++) {
+//        compressed += std::bitset<sizeof(float)*CHAR_BIT>(*reinterpret_cast<unsigned long*>(recv_blob.dptr<float>() + i)).to_string() + " ";
+//      }
+//      LOG(INFO) <<  "server recvd " << compressed;
 
       auto& stored = store_[key];
       dshape = TShape{(int64_t) original_size};
@@ -632,7 +638,7 @@ class KVStoreDistServer {
             updates.int_array = NDArray(dshape, Context(), false, mshadow::kInt32);
             updates.int_array = 0;
             TShape recompressed_shape = TShape{gradient_compression_->
-            GetServerRecompressedSize((int64_t) original_size)};
+              GetServerRecompressedSize((int64_t) original_size)};
             updates.requantized = NDArray(recompressed_shape, Context());
           }
           gradient_compression_->DequantizeForSum(recved, &updates.int_array, 0);
@@ -679,7 +685,7 @@ class KVStoreDistServer {
     // could be deallocated when this function returns. so we need to make sure
     // the operators with \a NDArray are actually finished
     if (req_meta.push) {
-      LOG(INFO) << "received push";
+      if(log_verbose_) LOG(INFO) << "rank: " << ps::MyRank() << " received push default";
       size_t ds[] = {(size_t) req_data.lens[0] / mshadow::mshadow_sizeof(type.dtype)};
       TShape dshape(ds, ds + 1);
       TBlob recv_blob;
@@ -700,7 +706,7 @@ class KVStoreDistServer {
           stored_dtype.WaitToRead();
         }
         stored.WaitToRead();
-        LOG(INFO) << "rank: " << ps::MyRank() << " inited key "<< key;
+        if (log_verbose_) LOG(INFO) << "rank: " << ps::MyRank() << " inited key "<< key;
       } else {
         auto &updates = update_buf_[key];
         if (sync_mode_ && updates.merged.is_none()) {

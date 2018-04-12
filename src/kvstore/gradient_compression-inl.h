@@ -26,10 +26,13 @@
 #define MXNET_KVSTORE_GRADIENT_COMPRESSION_INL_H_
 
 #include <vector>
+#include <bitset>
 #include "../operator/mxnet_op.h"
 
 namespace mxnet {
 namespace kvstore {
+
+//void log_array(std::string& name, )
 
 struct quantize_2bit {
   MSHADOW_XINLINE static void Map(int out_block_id,
@@ -95,6 +98,7 @@ MSHADOW_XINLINE static void Map(int out_byte_id,
                                 float *grad,
                                 float *residual,
                                 const float beta, const float oneminusbeta) {
+  // for each byte
   float *compr_block = out + (out_byte_id >> 2);
   // start and end are indices in original grad array
   // by 4 into 32 = into 8
@@ -102,26 +106,30 @@ MSHADOW_XINLINE static void Map(int out_byte_id,
   const int end = (start + 8 <= original_size) ? start + 8 : original_size;
   // cast as char* to manipulate bits of float addresses
   unsigned char *block_ptr = reinterpret_cast < unsigned char * > (compr_block) + (out_byte_id & 3);
+//  LOG(INFO) << (void*) block_ptr;
   // set to 0 by default
   *block_ptr = 0;
   float* res = residual + start;
   float* g = grad + start;
   uint8_t mask = 1U << 7;
   for (int i = start; i < end; i++) {
-    // adds offset to reach appropriate byte
     // adds gradient to existing residual to get updated grad
     *res = (*res * beta) + (oneminusbeta * (*g++));
+
+    // set bit to 1 if positive, else sets to 0
     if (*res++ >= 0) {
       *block_ptr |= mask;
     }
     mask >>= 1;
   }
+//  LOG(INFO) << std::bitset<8>(*block_ptr).to_string() ;
 }
 };
 
 template<typename xpu>
 void QuantizeSignumKernelLaunch(mshadow::Stream<xpu> *s, const std::vector<mxnet::TBlob> &inputs,
                                 const float beta) {
+  CHECK_NE(inputs[0].Size(), inputs[2].Size());
   mxnet::op::mxnet_op::Kernel<quantize_signum, xpu>
   ::Launch(s,
            inputs[2].Size() * 4,         // number of calls is each byte of compressed array
@@ -130,6 +138,12 @@ void QuantizeSignumKernelLaunch(mshadow::Stream<xpu> *s, const std::vector<mxnet
            inputs[0].dptr<float>(),  // original array
            inputs[1].dptr<float>(),  // residual array
            beta, 1-beta);               // positive threshold
+
+//  std::string compressed;
+//  for(int i=0; i<inputs[2].Size(); i++) {
+//    compressed += std::bitset<sizeof(float)*CHAR_BIT>(*reinterpret_cast<unsigned long*>(inputs[2].dptr<float>() + i)).to_string() + " ";
+//  }
+//  LOG(INFO) <<  compressed;
 }
 
 
@@ -193,7 +207,7 @@ MSHADOW_XINLINE static void Map(int i,
   ch_ptr += ((i & 31) >> 3);
   const uint8_t mask = 1U << (7- (i & 7) );
   const uint8_t masked = *ch_ptr & mask;
-
+//  LOG(INFO) << (void*) ch_ptr << " " << std::bitset<8>(mask) << " " << std::bitset<8>(*ch_ptr);
   // if bit at that position is 0, set outval to -1 else to 1
   *outval += (( masked == mask) * 2 ) - 1;
 }
@@ -202,16 +216,26 @@ MSHADOW_XINLINE static void Map(int i,
 template<typename xpu>
 void DequantizeSignumKernelLaunch(mshadow::Stream<xpu> *s,
                                   const std::vector<mxnet::TBlob> &inputs) {
-  std::cout << "in dequantize kernel launch" <<  inputs[1].Size() << " " << inputs[0].Size() << std::endl;
   // TODO ensure inputs[1] is set to 0 if you want only dequantized value. else it accumulates to the given location
+//  std::string compressed;
+//  for(int i=0; i<inputs[0].Size(); i++) {
+//    compressed += std::bitset<sizeof(float)*CHAR_BIT>(*reinterpret_cast<unsigned long*>(inputs[0].dptr<float>() + i)).to_string() + " ";
+//  }
+//  LOG(INFO) <<  compressed;
+
   MSHADOW_TYPE_SWITCH(inputs[1].type_flag_, DType, {
     mxnet::op::mxnet_op::Kernel<dequantize_signum, xpu>
     ::Launch(s,
              inputs[1].Size(),         // original size
              inputs[1].dptr<DType>(),  // out array
              inputs[0].dptr<float>());  // compressed array
-    std::cout << "at " << inputs[1].Size() << " " << *(inputs[1].dptr<DType>() + inputs[1].Size() - 1) << std::endl;
   });
+//  std::string out;
+//  for(int i=0; i<inputs[1].Size(); i++) {
+//    out += std::to_string(*(inputs[1].dptr<float>() + i)) + " ";
+//  }
+//
+//  LOG(INFO) << out;
 
 }
 

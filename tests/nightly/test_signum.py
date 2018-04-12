@@ -35,19 +35,18 @@ rate = 1
 shape = (2, 3)
 irregular_shape = (1241, 1211)
 big_shape = (1200, 1200)        # bigger than MXNET_KVSTORE_BIGARRAY_BOUND
-keys_shapes = [('1121', irregular_shape)]#, ('1122', big_shape), ('1211', shape)]
+keys_shapes = [('1212', big_shape)]#('1121', shape)]#, ]#, ('1121', irregular_shape), ]
 kv = mx.kv.create('dist_sync')
 
 def test_sync_push_pull(options):
     def init_kv(options):
-        kv.set_gradient_compression({'type': 'signum',
-                                     'beta':options.beta,
-                                     'server_compression_type': options.recompress_type})
+        # kv.set_gradient_compression({'type': 'signum',
+        #                              'beta': options.beta,
+        #                              'server_compression_type': options.recompress_type})
         kv.set_optimizer(mx.optimizer.create('test', rescale_grad=rate))
         # init kv compression key
-        # for k,s in keys_shapes:
-        #     kv.init(k, mx.nd.zeros(s))
-
+        for k,s in keys_shapes:
+            kv.init(k, mx.nd.zeros(s))
 
     def check_compr_ones():
         for k, s in keys_shapes:
@@ -57,7 +56,6 @@ def test_sync_push_pull(options):
             break
             kv.push(k, mx.nd.ones(s) * 0.4)
             val2 = mx.nd.zeros(s)
-            mx.nd.waitall()
             kv.pull(k, val2)
             if options.recompress_type == 'majority':
                 newval = curval + (1 * rate)
@@ -75,7 +73,7 @@ def test_sync_push_pull(options):
             grads = {}
             signs = {}
             majority = {}
-            for k,s in keys_shapes:
+            for k, s in keys_shapes:
                 grads[k] = []
                 signs[k] = np.zeros(s)
                 majority[k] = np.zeros(s)
@@ -85,7 +83,7 @@ def test_sync_push_pull(options):
                     rand_arr = mx.nd.array(rnd.randn(s[0], s[1]))
                     grads[k].append(rand_arr)
                     sgn = np.sign(rand_arr.asnumpy())
-                    sgn[sgn==0] = 1
+                    sgn[sgn == 0] = 1
                     signs[k] += sgn
                 majority[k][signs[k] >= 0] = 1
                 majority[k][signs[k] < 0] = -1
@@ -106,18 +104,18 @@ def test_sync_push_pull(options):
                     if kv.rank == 0:
                         e.args += ('key:', k, 'grads', grads[k], 'majority', majority[k], 'signs', signs[k], 'diff', diff)
 
-    # init_kv(options)
-    # check_compr_ones()
-    # if options.recompress_type == 'majority':
-    #     check_compr_random_majority(options.nrepeat, kv.num_workers)
+    init_kv(options)
+    check_compr_ones()
+    if options.recompress_type == 'majority':
+        check_compr_random_majority(options.nrepeat, kv.num_workers)
     # elif options.recompress_type == 'none':
     #     check_compr_random_norecompress(options.nrepeat, kv.num_workers)
-    print('worker ' + str(kv.rank) + ' is done with signum compression tests')
+    # print('worker ' + str(kv.rank) + ' is done with signum compression tests')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='test signum gradient compression')
     parser.add_argument('--beta', type=float, default=0)
-    parser.add_argument('--nrepeat', type=int, default=1)
-    parser.add_argument('--recompress-type', type=str, default='majority')
+    parser.add_argument('--nrepeat', type=int, default=5)
+    parser.add_argument('--recompress-type', type=str, default='none')
     opt = parser.parse_args()
     test_sync_push_pull(opt)
