@@ -57,7 +57,7 @@ class KVStoreDist : public KVStoreLocal {
       }
     }
     bigarray_bound_ = dmlc::GetEnv("MXNET_KVSTORE_BIGARRAY_BOUND", 1000 * 1000);
-    log_verbose_ = dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
+    log_verbose_ = false; //dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
   }
 
   virtual ~KVStoreDist() {
@@ -294,8 +294,10 @@ class KVStoreDist : public KVStoreLocal {
         // it may happen for the first time a no-rank-0 worker pull the weight.
         recv_buf = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_, true, grouped_vals[i][0]->dtype());
       }
+//      LOG(INFO) << (void *) send_buf.var() << " " << send_buf.data().dptr_ << "sendbuf none"<<send_buf.is_none();;
       if (send_buf.is_none()) {
-        send_buf = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_, true, grouped_vals[i][0]->dtype());
+        LOG(INFO) << "is send buf none for pull " << send_buf.is_none();
+        send_buf = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_, false, grouped_vals[i][0]->dtype());
       }
       if (gradient_compression_->get_server_compression_type() != CompressionType::kNone
           && recv_compr_buf.is_none()) {
@@ -326,7 +328,6 @@ class KVStoreDist : public KVStoreLocal {
         const int cmd = GetCommandType(mode, mshadow::kFloat32);
         const int num_bytes = mshadow::mshadow_sizeof(mshadow::kFloat32);
         PSKV &pskv = EncodeCompressedKey(key, recv_buf.shape().Size(), false, num_bytes, !full_pull);
-
         char* data = static_cast<char*> (full_pull ? recv_buf.data().dptr_
                                                    : recv_compr_buf.data().dptr_);
         // false means not to delete data when SArray is deleted
@@ -337,9 +338,13 @@ class KVStoreDist : public KVStoreLocal {
       };
 
       std::vector<Engine::VarHandle> mutable_vars = {recv_buf.var(), send_buf.var()};
-      //send_buf is taken as write dep so that push doesn't go first
+      //send_buf is taken as write dep so that next push doesn't go first
       if (gradient_compression_->get_server_compression_type() != CompressionType::kNone) {
         mutable_vars.push_back(recv_compr_buf.var());
+      }
+      auto &compr_buf = send_compr_buf_[key];
+      if (!compr_buf.is_none()) {
+        mutable_vars.push_back(compr_buf.var());
       }
 
       CHECK_NOTNULL(Engine::Get())->PushAsync(pull_from_servers, pinned_ctx_, {}, mutable_vars,
@@ -356,7 +361,7 @@ class KVStoreDist : public KVStoreLocal {
         comm_->Broadcast(key, decomp_buf, grouped_vals[i], priority);
         decomp_buf = 0;
       } else {
-//        comm_->Broadcast(key, recv_buf, grouped_vals[i], priority);
+        comm_->Broadcast(key, recv_buf, grouped_vals[i], priority);
       }
       if (!first_pull_done_[key]) first_pull_done_[key] = true;
     }
@@ -431,22 +436,22 @@ class KVStoreDist : public KVStoreLocal {
   void CopyToSendBuf(int key, const NDArray& merged, const NDArrayStorageType& storage_type,
                      int priority) {
     auto &send_buf = send_buf_[key];
-    if (merged.ctx().dev_mask() == cpu::kDevMask) {
+//    if (merged.ctx().dev_mask() == cpu::kDevMask) {
       // Start of a push doesn't guarantee that the previous pushes are completed.
       // This shouldn't affect training of networks though because training involves
       // a sequence of push, pull, then push. This imposes ordering that the
       // second push happens after the first pull, and the pull happens after first push.
-      send_buf = merged;
-    } else {
-      if (send_buf .is_none()) {
+//      send_buf = merged;
+//    } else {
+      if (send_buf.is_none()) {
         if (storage_type == kDefaultStorage) {
-          send_buf  = NDArray(merged.shape(), pinned_ctx_, true, merged.dtype());
+          send_buf  = NDArray(merged.shape(), pinned_ctx_, false, merged.dtype());
         } else {
           send_buf  = NDArray(storage_type, merged.shape(), pinned_ctx_, true, merged.dtype());
         }
       }
       CopyFromTo(merged, &send_buf);
-    }
+//    }
   }
 
   void Push_(const std::vector<int>& keys,
@@ -498,11 +503,10 @@ class KVStoreDist : public KVStoreLocal {
 //            for(int i=0; i<compr_buf.shape().Size(); i++) {
 //              compressed += std::bitset<sizeof(float)*CHAR_BIT>(*reinterpret_cast<unsigned long*>(compr_buf.data().dptr<float>() + i)).to_string() + " ";
 //            }
-//            LOG(INFO) <<  "worker sent " << compressed;
+//            LOG(INFO) << "worker sent " << compressed;
 
             PushCompressed(key, compr_buf, pskv, priority);
           } else {
-            LOG(INFO)<<"this";
             CopyToSendBuf(key, merged, storage_type, priority);
             PushDefault(key, send_buf, pskv, priority);
           }
@@ -531,13 +535,12 @@ class KVStoreDist : public KVStoreLocal {
         int cmd = GetCommandType(RequestType::kCompressedPush, small_send_buf.dtype());
         CHECK_NOTNULL(ps_worker_)->ZPush(pskv.keys, vals, pskv.lens, cmd, [cb]() { cb(); });
       };
-    CHECK(!send_buf_[key].is_none());
     // acquire locks on both comm_buf and small_buf so that
     // pull (which uses send_buf) for the same key waits till push finishes
     Engine::Get()->PushAsync(
       push_to_servers,
       pinned_ctx_,
-      {small_send_buf.var(), send_buf_[key].var()},
+      {small_send_buf.var()},
       {},
       FnProperty::kNormal,
       priority,
@@ -547,7 +550,7 @@ class KVStoreDist : public KVStoreLocal {
   void PushDefault(int key, const NDArray &send_buf, const PSKV& pskv, int priority) {
     auto push_to_servers =
         [this, key, pskv, send_buf](RunContext rctx, Engine::CallbackOnComplete cb) {
-          if (log_verbose_) LOG(INFO) << "Executing default Push for key" << key;
+          LOG(INFO) << send_buf.shape().Size() << " " << send_buf.is_none();
           const int dtype = send_buf.dtype();
           // convert to ps keys
           const size_t size = send_buf.shape().Size() * mshadow::mshadow_sizeof(dtype);
@@ -809,6 +812,7 @@ class KVStoreDist : public KVStoreLocal {
           compr_pull_pskv.keys.push_back(ps_key);
           full_pull_pskv.keys.push_back(ps_key);
 
+          LOG(INFO) << pull_part * num_bytes;
           compr_push_pskv.lens.push_back(push_part * num_bytes);
           compr_pull_pskv.lens.push_back(pull_part * num_bytes);
           full_pull_pskv.lens.push_back(part_orig * num_bytes);

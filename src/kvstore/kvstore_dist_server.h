@@ -159,7 +159,7 @@ class KVStoreDistServer {
         std::bind(&KVStoreDistServer::DataHandleEx, this, _1, _2, _3));
     sync_mode_ = false;
     gradient_compression_ = std::make_shared<GradientCompression>();
-    log_verbose_ = dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
+    log_verbose_ = false ;//dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
   }
 
   ~KVStoreDistServer() {
@@ -265,6 +265,7 @@ class KVStoreDistServer {
   void DataHandleEx(const ps::KVMeta& req_meta,
                     const ps::KVPairs<char>& req_data,
                     ps::KVServer<char>* server) {
+    LOG(INFO) << "recvd cmd " << req_meta.cmd;
     DataHandleType type = DepairDataHandleType(req_meta.cmd);
     switch (type.requestType) {
       case RequestType::kRowSparsePushPull:
@@ -557,6 +558,8 @@ class KVStoreDistServer {
                               const ps::KVMeta& req_meta,
                               const ps::KVPairs<char> &req_data,
                               ps::KVServer<char>* server) {
+    if (log_verbose_) LOG(INFO) << "rank " << ps::MyRank() << " : received pull of type "
+                                                           << static_cast<int>(type.requestType);
     NDArray* response_arr;
     if (type.requestType == RequestType::kCompressedPull) {
       response_arr = &update_buf_[key].requantized;
@@ -620,6 +623,7 @@ class KVStoreDistServer {
 //        server->Response(req_meta);
 //        stored.WaitToRead();
 //      } else
+
       if (sync_mode_) {
         CHECK(!stored.is_none()) << "Init of a key has to be uncompressed";
         // synced push

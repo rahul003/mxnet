@@ -34,26 +34,29 @@ def check_diff_to_scalar(A, x, rank=None):
 rate = 1
 shape = (2, 3)
 irregular_shape = (1241, 1211)
-big_shape = (1200, 1200)        # bigger than MXNET_KVSTORE_BIGARRAY_BOUND
-keys_shapes = [('1212', big_shape)]#('1121', shape)]#, ]#, ('1121', irregular_shape), ]
+big_shape = (1200, 1200)        # 0bigger than MXNET_KVSTORE_BIGARRAY_BOUND
+keys_shapes = [('1212', (1000,1000))]#('1121', shape)]#, ]#, ('1121', irregular_shape), ]
 kv = mx.kv.create('dist_sync')
 
 def test_sync_push_pull(options):
     def init_kv(options):
-        # kv.set_gradient_compression({'type': 'signum',
-        #                              'beta': options.beta,
-        #                              'server_compression_type': options.recompress_type})
+        kv.set_gradient_compression({'type': 'signum',
+                                     'beta': options.beta,
+                                     'server_compression_type': options.recompress_type})
         kv.set_optimizer(mx.optimizer.create('test', rescale_grad=rate))
         # init kv compression key
         for k,s in keys_shapes:
             kv.init(k, mx.nd.zeros(s))
+
+        import time
+        time.sleep(5)
 
     def check_compr_ones():
         for k, s in keys_shapes:
             val = mx.nd.zeros(s)
             kv.pull(k, val)
             curval = val[0][0].asnumpy()[0]
-            break
+
             kv.push(k, mx.nd.ones(s) * 0.4)
             val2 = mx.nd.zeros(s)
             kv.pull(k, val2)
@@ -106,8 +109,8 @@ def test_sync_push_pull(options):
 
     init_kv(options)
     check_compr_ones()
-    if options.recompress_type == 'majority':
-        check_compr_random_majority(options.nrepeat, kv.num_workers)
+    # if options.recompress_type == 'majority':
+        # check_compr_random_majority(options.nrepeat, kv.num_workers)
     # elif options.recompress_type == 'none':
     #     check_compr_random_norecompress(options.nrepeat, kv.num_workers)
     # print('worker ' + str(kv.rank) + ' is done with signum compression tests')
@@ -115,7 +118,7 @@ def test_sync_push_pull(options):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='test signum gradient compression')
     parser.add_argument('--beta', type=float, default=0)
-    parser.add_argument('--nrepeat', type=int, default=5)
+    parser.add_argument('--nrepeat', type=int, default=1)
     parser.add_argument('--recompress-type', type=str, default='none')
     opt = parser.parse_args()
     test_sync_push_pull(opt)
