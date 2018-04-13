@@ -28,7 +28,7 @@
 #include <vector>
 #include <bitset>
 #include "../operator/mxnet_op.h"
-
+#include "gradient_compression.h"
 namespace mxnet {
 namespace kvstore {
 
