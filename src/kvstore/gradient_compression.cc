@@ -176,26 +176,16 @@ int64_t GradientCompression::GetCompressedSize(const CompressionType& type, cons
           original_size / bits + 1);
 }
 
-int64_t GradientCompression::GetServerRecompressedSize(const int64_t original_size) {
+int64_t GradientCompression::GetServerResponseSize(const int64_t original_size) {
   if (server_compression_type_ == CompressionType::kMajority) {
     return GetCompressedSize(server_compression_type_, original_size);
   } else if (server_compression_type_ == CompressionType::kNone) {
     return original_size;
   } else {
     LOG(FATAL) << "Unsupported compression type: " << get_server_compression_type_str();
+    return 0;
   }
-  return 0;
 }
-
-//int GradientCompression::GetServerCompressionNumBits(const int num_workers) {
-//  if (server_compression_type_ == CompressionType::kMajority) {
-//    return 1;
-//  } else if (server_compression_type_ == CompressionType::kNone) {
-//    return 32;
-//  } else {
-//    LOG(FATAL) << "Check server compression type " << get_server_compression_type_str();
-//  }
-//}
 
 void GradientCompression::Quantize(const mxnet::NDArray &from,
                                    mxnet::NDArray *to,

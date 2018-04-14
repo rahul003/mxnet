@@ -164,7 +164,7 @@ class KVStoreDist : public KVStoreLocal {
   struct ComprPSKV {
     PSKV push;
     PSKV pull;
-    PSKV full_pull;
+    PSKV full;
   };
 
   /**
@@ -294,15 +294,14 @@ class KVStoreDist : public KVStoreLocal {
         // it may happen for the first time a no-rank-0 worker pull the weight.
         recv_buf = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_, true, grouped_vals[i][0]->dtype());
       }
-//      LOG(INFO) << (void *) send_buf.var() << " " << send_buf.data().dptr_ << "sendbuf none"<<send_buf.is_none();;
+      // can be none for ranks other than 0 which don't init key
       if (send_buf.is_none()) {
-        LOG(INFO) << "is send buf none for pull " << send_buf.is_none();
         send_buf = NDArray(grouped_vals[i][0]->shape(), pinned_ctx_, false, grouped_vals[i][0]->dtype());
       }
       if (gradient_compression_->get_server_compression_type() != CompressionType::kNone
           && recv_compr_buf.is_none()) {
         TShape recompr_shape = TShape{gradient_compression_->
-                                      GetServerRecompressedSize((int64_t) grouped_vals[i][0]->shape().Size())};
+        GetServerResponseSize((int64_t) grouped_vals[i][0]->shape().Size())};
         recv_compr_buf = NDArray(recompr_shape, pinned_ctx_, true, grouped_vals[i][0]->dtype());
       }
 
@@ -327,7 +326,7 @@ class KVStoreDist : public KVStoreLocal {
         }
         const int cmd = GetCommandType(mode, mshadow::kFloat32);
         const int num_bytes = mshadow::mshadow_sizeof(mshadow::kFloat32);
-        PSKV &pskv = EncodeCompressedKey(key, recv_buf.shape().Size(), false, num_bytes, !full_pull);
+        PSKV &pskv = EncodeCompressedKey(key, recv_buf.shape().Size(), num_bytes, false, !full_pull);
         char* data = static_cast<char*> (full_pull ? recv_buf.data().dptr_
                                                    : recv_compr_buf.data().dptr_);
         // false means not to delete data when SArray is deleted
@@ -485,7 +484,7 @@ class KVStoreDist : public KVStoreLocal {
           // detect whether the push is initialization of a key or not.
           // is_active is false when push is initialization of key
           bool is_active = do_merge;
-          PSKV &pskv = EncodeCompressedKey(key, merged.shape().Size(), true, num_bytes, is_active);
+          PSKV &pskv = EncodeCompressedKey(key, merged.shape().Size(), num_bytes, true, is_active);
           // Returns push_pskv if active, else pull_pskv
           // we want inactive gc to send uncompressed gradients,
           // but sharded in the same way as later pushes would when gc becomes active
@@ -524,7 +523,6 @@ class KVStoreDist : public KVStoreLocal {
 
   void PushCompressed(int key, const NDArray& small_send_buf,
                       const PSKV& pskv, int priority) {
-    if (log_verbose_) LOG(INFO) << "rank " << ps::MyRank() << ": Compressed Push for key " << key;
     auto push_to_servers =
       [this, key, pskv, small_send_buf](RunContext rctx, Engine::CallbackOnComplete cb) {
         size_t size = small_send_buf.shape().Size() *
@@ -550,7 +548,6 @@ class KVStoreDist : public KVStoreLocal {
   void PushDefault(int key, const NDArray &send_buf, const PSKV& pskv, int priority) {
     auto push_to_servers =
         [this, key, pskv, send_buf](RunContext rctx, Engine::CallbackOnComplete cb) {
-          LOG(INFO) << send_buf.shape().Size() << " " << send_buf.is_none();
           const int dtype = send_buf.dtype();
           // convert to ps keys
           const size_t size = send_buf.shape().Size() * mshadow::mshadow_sizeof(dtype);
@@ -723,14 +720,16 @@ class KVStoreDist : public KVStoreLocal {
    * \return PSKV used for both push and pull
    */
   inline PSKV& EncodeCompressedKey(const int key, const size_t original_num_elem,
-                                   const bool is_push, const int num_bytes, bool is_compressed = true) {
+                                   const int num_bytes, const RequestType& requestType) {
     mu_.lock();
-    PSKV& pskv = (is_compressed && is_push) ? compr_ps_kv_[key].push :
-                 ((is_compressed) ? compr_ps_kv_[key].pull : compr_ps_kv_[key].full_pull);
+    PSKV& pskv = (requestType == RequestType::kCompressedPush) ? compr_ps_kv_[key].push :
+                 ((requestType == RequestType::kCompressedPull) ? compr_ps_kv_[key].pull :
+                  compr_ps_kv_[key].full);
     mu_.unlock();
 
-    size_t pull_compr_num_elem = gradient_compression_->GetServerRecompressedSize(original_num_elem);
+    size_t pull_compr_num_elem = gradient_compression_->GetServerResponseSize(original_num_elem);
     size_t pull_num_elem = (is_compressed) ? pull_compr_num_elem : original_num_elem;
+    LOG(INFO) << pull_num_elem;
     // push_compr_num_elem can't be calculated like this because sharding can introducing roundoff
     if (!pskv.keys.empty()) {
       if (!is_push) {
@@ -748,7 +747,7 @@ class KVStoreDist : public KVStoreLocal {
       mu_.lock();
       PSKV& compr_pull_pskv = compr_ps_kv_[key].pull;
       PSKV& compr_push_pskv = compr_ps_kv_[key].push;
-      PSKV& full_pull_pskv = compr_ps_kv_[key].full_pull;
+      PSKV& full_pull_pskv = compr_ps_kv_[key].full;
       mu_.unlock();
 
       if (original_num_elem < bigarray_bound_) {
@@ -784,18 +783,22 @@ class KVStoreDist : public KVStoreLocal {
         compr_push_pskv.size = 0;
         full_pull_pskv.size = 0;
         compr_pull_pskv.size = 0;
-
         for (int i = 0; i < num_servers; ++i) {
           size_t push_part, pull_part, part_orig;
           if (i == num_servers-1) {
             pull_part = pull_compr_num_elem - compr_pull_pskv.size;
+            CHECK_LT(full_pull_pskv.size, original_num_elem);
             part_orig = original_num_elem - full_pull_pskv.size;
             push_part = gradient_compression_->GetCompressedSize(part_orig);
           } else {
             pull_part =
               static_cast<size_t> (round(static_cast<double>(pull_compr_num_elem)/num_servers*(i+1))) -
               static_cast<size_t> (round(static_cast<double>(pull_compr_num_elem)/num_servers*(i)));
-            part_orig = pull_part * gradient_compression_->GetCompressionFactor();
+            if (gradient_compression_->get_server_compression_type() == CompressionType::kNone) {
+              part_orig = pull_part;
+            } else {
+              part_orig = pull_part * gradient_compression_->GetCompressionFactor();
+            }
             push_part = gradient_compression_->GetCompressedSize(part_orig);
           }
 
@@ -812,7 +815,6 @@ class KVStoreDist : public KVStoreLocal {
           compr_pull_pskv.keys.push_back(ps_key);
           full_pull_pskv.keys.push_back(ps_key);
 
-          LOG(INFO) << pull_part * num_bytes;
           compr_push_pskv.lens.push_back(push_part * num_bytes);
           compr_pull_pskv.lens.push_back(pull_part * num_bytes);
           full_pull_pskv.lens.push_back(part_orig * num_bytes);

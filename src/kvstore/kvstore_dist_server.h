@@ -46,7 +46,8 @@ enum class CommandType {
 };
 
 enum class RequestType {
-  kDefaultPushPull, kRowSparsePushPull, kCompressedPush, kCompressedPull, kCompressedFullPull
+  kDefaultPushPull, kRowSparsePushPull, kCompressedPush, kCompressedPull,
+  kCompressedFullPull, kCompressedInit
 };
 
 struct DataHandleType {
@@ -159,7 +160,7 @@ class KVStoreDistServer {
         std::bind(&KVStoreDistServer::DataHandleEx, this, _1, _2, _3));
     sync_mode_ = false;
     gradient_compression_ = std::make_shared<GradientCompression>();
-    log_verbose_ = false ;//dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
+    log_verbose_ = true ;//dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
   }
 
   ~KVStoreDistServer() {
@@ -265,7 +266,6 @@ class KVStoreDistServer {
   void DataHandleEx(const ps::KVMeta& req_meta,
                     const ps::KVPairs<char>& req_data,
                     ps::KVServer<char>* server) {
-    LOG(INFO) << "recvd cmd " << req_meta.cmd;
     DataHandleType type = DepairDataHandleType(req_meta.cmd);
     switch (type.requestType) {
       case RequestType::kRowSparsePushPull:
@@ -312,7 +312,8 @@ class KVStoreDistServer {
       update_buf->request.clear();
       if (has_multi_precision_copy(type)) CopyFromTo(stored, store_[key]);
       stored.WaitToRead();
-      LOG(INFO) << "inited key "<<key << (void *) &stored;
+
+      LOG(INFO) << " stored value is " << *(stored.data().dptr<float>());
       // reset needed for gradient compression
       if (reset_merged) update_buf->merged = 0;
     } else {
@@ -558,8 +559,9 @@ class KVStoreDistServer {
                               const ps::KVMeta& req_meta,
                               const ps::KVPairs<char> &req_data,
                               ps::KVServer<char>* server) {
-    if (log_verbose_) LOG(INFO) << "rank " << ps::MyRank() << " : received pull of type "
-                                                           << static_cast<int>(type.requestType);
+//    if (log_verbose_) {
+//      LOG(INFO) << "rank " << ps::MyRank() << " : received pull of type "<< static_cast<int>(type.requestType);
+//    }
     NDArray* response_arr;
     if (type.requestType == RequestType::kCompressedPull) {
       response_arr = &update_buf_[key].requantized;
@@ -591,9 +593,7 @@ class KVStoreDistServer {
     CHECK_EQ(type.dtype, mshadow::kFloat32)
       << "Gradient compression is currently supported for fp32 only";
     if (req_meta.push) {
-      if (log_verbose_) {
-        LOG(INFO) << "rank: " << ps::MyRank() << " received compressed push";
-      }
+      LOG(INFO) << "rank: " << ps::MyRank() << " received compressed push";
       // first for dummy key which represents original size of array, whose len is 0
       CHECK_EQ(req_data.keys.size(), (size_t)2);
       CHECK_EQ(req_data.lens.size(), (size_t)2);
@@ -642,7 +642,7 @@ class KVStoreDistServer {
             updates.int_array = NDArray(dshape, Context(), false, mshadow::kInt32);
             updates.int_array = 0;
             TShape recompressed_shape = TShape{gradient_compression_->
-              GetServerRecompressedSize((int64_t) original_size)};
+            GetServerResponseSize((int64_t) original_size)};
             updates.requantized = NDArray(recompressed_shape, Context());
           }
           gradient_compression_->DequantizeForSum(recved, &updates.int_array, 0);
@@ -689,7 +689,7 @@ class KVStoreDistServer {
     // could be deallocated when this function returns. so we need to make sure
     // the operators with \a NDArray are actually finished
     if (req_meta.push) {
-      if(log_verbose_) LOG(INFO) << "rank: " << ps::MyRank() << " received push default";
+//      if(log_verbose_) LOG(INFO) << "rank: " << ps::MyRank() << " received push default";
       size_t ds[] = {(size_t) req_data.lens[0] / mshadow::mshadow_sizeof(type.dtype)};
       TShape dshape(ds, ds + 1);
       TBlob recv_blob;
@@ -710,7 +710,7 @@ class KVStoreDistServer {
           stored_dtype.WaitToRead();
         }
         stored.WaitToRead();
-        if (log_verbose_) LOG(INFO) << "rank: " << ps::MyRank() << " inited key "<< key;
+//        if (log_verbose_) LOG(INFO) << "rank: " << ps::MyRank() << " inited key "<< key;
       } else {
         auto &updates = update_buf_[key];
         if (sync_mode_ && updates.merged.is_none()) {

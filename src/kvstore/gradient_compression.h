@@ -171,7 +171,7 @@ class GradientCompression {
    * \brief returns recompressed size after merging partially dequantized gradients from each worker
    * \param num_workers number of workers from whom gradients are being accumulated
    */
-  int64_t GetServerRecompressedSize(const int64_t original_size);
+  int64_t GetServerResponseSize(const int64_t original_size);
 
   /*!
   * \brief Issues quantize operation to be scheduled by the engine

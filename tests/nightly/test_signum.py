@@ -35,7 +35,7 @@ rate = 1
 shape = (2, 3)
 irregular_shape = (1241, 1211)
 big_shape = (1200, 1200)        # 0bigger than MXNET_KVSTORE_BIGARRAY_BOUND
-keys_shapes = [('1212', (1000,1000))]#('1121', shape)]#, ]#, ('1121', irregular_shape), ]
+keys_shapes = [('1', irregular_shape)]#, ('2', shape), ('3', irregular_shape)]
 kv = mx.kv.create('dist_sync')
 
 def test_sync_push_pull(options):
@@ -48,23 +48,27 @@ def test_sync_push_pull(options):
         for k,s in keys_shapes:
             kv.init(k, mx.nd.zeros(s))
 
-        import time
-        time.sleep(5)
+    def check_compr_pushes(options, value):
+        for i in range(options.nrepeat):
+            for k, s in keys_shapes:
+                val = mx.nd.zeros(s)
+                kv.pull(k, val)
+                curval = val[0][0].asnumpy()[0]
+                kv.push(k, mx.nd.ones(s) * value)
+                val2 = mx.nd.zeros(s)
+                kv.pull(k, val2)
+                sign = 1 if value >= 0 else -1
+                if options.recompress_type == 'majority':
+                    newval = curval + (1 * rate * sign)
+                else:
+                    newval = curval + (kv.num_workers * rate * sign)
+                check_diff_to_scalar(val2, newval)
 
-    def check_compr_ones():
-        for k, s in keys_shapes:
-            val = mx.nd.zeros(s)
-            kv.pull(k, val)
-            curval = val[0][0].asnumpy()[0]
+    def check_compr_pos(options):
+        check_compr_pushes(options, 0.4)
 
-            kv.push(k, mx.nd.ones(s) * 0.4)
-            val2 = mx.nd.zeros(s)
-            kv.pull(k, val2)
-            if options.recompress_type == 'majority':
-                newval = curval + (1 * rate)
-            else:
-                newval = curval + (kv.num_workers * rate)
-            check_diff_to_scalar(val2, newval)
+    def check_compr_neg(options):
+        check_compr_pushes(options, -0.4)
 
     def check_compr_random_majority(nrepeat, nworker):
         # set a seed so all workers generate same data. knowing this helps
@@ -107,12 +111,50 @@ def test_sync_push_pull(options):
                     if kv.rank == 0:
                         e.args += ('key:', k, 'grads', grads[k], 'majority', majority[k], 'signs', signs[k], 'diff', diff)
 
+    def check_compr_random_none(nrepeat, nworker):
+        # set a seed so all workers generate same data. knowing this helps
+        # calculate expected value after pull
+        start_seed = 0
+        for l in range(nrepeat):
+            seeds = range(start_seed + nworker)
+            start_seed += nworker
+            grads = {}
+            signs = {}
+            for k, s in keys_shapes:
+                grads[k] = []
+                signs[k] = np.zeros(s)
+                for w in range(nworker):
+                    mx.random.seed(seeds[w % len(seeds)])
+                    rnd.seed(seeds[w % len(seeds)])
+                    rand_arr = mx.nd.array(rnd.randn(s[0], s[1]))
+                    grads[k].append(rand_arr)
+                    sgn = np.sign(rand_arr.asnumpy())
+                    sgn[sgn == 0] = 1
+                    signs[k] += sgn
+
+            # creates a copy because push changes grad because of assignment
+            grads_cpy = dict(grads)
+            for k, s in keys_shapes:
+                orig_val = mx.nd.zeros(s)
+                kv.pull(k, orig_val)
+                kv.push(k, grads_cpy[k][kv.rank])
+                val = mx.nd.zeros(s)
+                kv.pull(k, val)
+                diff = val - orig_val
+                # print(grads_cpy[k][kv.rank], diff)
+                try:
+                    assert_almost_equal(diff.asnumpy(), signs[k])
+                except AssertionError as e:
+                    if kv.rank == 0:
+                        e.args += ('key:', k, 'grads', grads[k], 'signs', signs[k], 'diff', diff)
+
     init_kv(options)
-    check_compr_ones()
+    check_compr_pos(options)
+    # check_compr_neg(options)
     # if options.recompress_type == 'majority':
-        # check_compr_random_majority(options.nrepeat, kv.num_workers)
+    #     check_compr_random_majority(options.nrepeat, kv.num_workers)
     # elif options.recompress_type == 'none':
-    #     check_compr_random_norecompress(options.nrepeat, kv.num_workers)
+    #     check_compr_random_none(options.nrepeat, kv.num_workers)
     # print('worker ' + str(kv.rank) + ' is done with signum compression tests')
 
 if __name__ == "__main__":
