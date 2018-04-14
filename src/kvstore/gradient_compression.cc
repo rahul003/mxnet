@@ -154,33 +154,40 @@ int GradientCompression::GetCompressionFactor() {
   return GetCompressionFactor(type_);
 }
 
+int GradientCompression::GetServerCompressionFactor() {
+  return GetCompressionFactor(get_server_compression_type());
+}
+
 int GradientCompression::GetCompressionFactor(const CompressionType& type) {
   if (type == CompressionType::kTwoBit) {
     return 16;
   } else if (type == CompressionType::kSignum || type == CompressionType::kMajority) {
     return 32;
-  }  else {
+  } else if (type == CompressionType::kNone ) {
+    return 1;
+  } else {
     LOG(FATAL) << "Unknown compression type: " << static_cast<int>(type);
     return 0;
   }
 }
 
-int64_t GradientCompression::GetCompressedSize(const int64_t original_size) {
+size_t GradientCompression::GetCompressedSize(const size_t original_size) {
   return GetCompressedSize(type_, original_size);
 }
 
-int64_t GradientCompression::GetCompressedSize(const CompressionType& type, const int64_t original_size) {
+size_t GradientCompression::GetCompressedSize(const CompressionType& type, const size_t original_size) {
   const int bits = GetCompressionFactor(type);
   return ((original_size % bits == 0) ?
           original_size / bits :
           original_size / bits + 1);
 }
 
-int64_t GradientCompression::GetServerResponseSize(const int64_t original_size) {
-  if (server_compression_type_ == CompressionType::kMajority) {
-    return GetCompressedSize(server_compression_type_, original_size);
-  } else if (server_compression_type_ == CompressionType::kNone) {
+
+size_t GradientCompression::GetServerResponseSize(const size_t original_size, bool is_compressed) {
+  if (!is_compressed || server_compression_type_ == CompressionType::kNone) {
     return original_size;
+  } else if (server_compression_type_ == CompressionType::kMajority) {
+    return GetCompressedSize(server_compression_type_, original_size);
   } else {
     LOG(FATAL) << "Unsupported compression type: " << get_server_compression_type_str();
     return 0;

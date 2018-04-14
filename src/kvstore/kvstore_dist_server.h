@@ -266,6 +266,7 @@ class KVStoreDistServer {
   void DataHandleEx(const ps::KVMeta& req_meta,
                     const ps::KVPairs<char>& req_data,
                     ps::KVServer<char>* server) {
+    if (req_meta.cmd != 10) LOG(INFO) << ps::MyRank() << " " << req_meta.cmd;
     DataHandleType type = DepairDataHandleType(req_meta.cmd);
     switch (type.requestType) {
       case RequestType::kRowSparsePushPull:
@@ -641,8 +642,8 @@ class KVStoreDistServer {
           if (updates.int_array.is_none()) {
             updates.int_array = NDArray(dshape, Context(), false, mshadow::kInt32);
             updates.int_array = 0;
-            TShape recompressed_shape = TShape{gradient_compression_->
-            GetServerResponseSize((int64_t) original_size)};
+            TShape recompressed_shape = TShape{static_cast<int64_t>(gradient_compression_->
+              GetServerResponseSize(original_size, true))};
             updates.requantized = NDArray(recompressed_shape, Context());
           }
           gradient_compression_->DequantizeForSum(recved, &updates.int_array, 0);
