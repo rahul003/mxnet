@@ -55,7 +55,7 @@ struct GradientCompressionParam : public dmlc::Parameter<GradientCompressionPara
       .describe("Threshold to use for 2bit gradient compression");
     DMLC_DECLARE_FIELD(beta).set_default(0.9)
     .describe("Momentum parameter to use for efficient Signum compression");
-    DMLC_DECLARE_FIELD(server_compression_type).set_default("none")
+    DMLC_DECLARE_FIELD(server_compression_type).set_default("majority")
     .describe("Type of compression done by server after aggregating workers' gradients");
     DMLC_DECLARE_FIELD(compression_step).set_default("gpu_after_aggregation")
     .describe("When compression should be done for distributed case. Takes gpu_after_aggregation, "

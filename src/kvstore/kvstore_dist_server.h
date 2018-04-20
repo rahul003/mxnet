@@ -160,7 +160,7 @@ class KVStoreDistServer {
         std::bind(&KVStoreDistServer::DataHandleEx, this, _1, _2, _3));
     sync_mode_ = false;
     gradient_compression_ = std::make_shared<GradientCompression>();
-    log_verbose_ = true ;//dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
+    log_verbose_ = dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
   }
 
   ~KVStoreDistServer() {
@@ -266,7 +266,7 @@ class KVStoreDistServer {
   void DataHandleEx(const ps::KVMeta& req_meta,
                     const ps::KVPairs<char>& req_data,
                     ps::KVServer<char>* server) {
-    if (req_meta.cmd != 10) LOG(INFO) << ps::MyRank() << " " << req_meta.cmd;
+//    if (req_meta.cmd != 10) LOG(INFO) << ps::MyRank() << " " << req_meta.cmd;
     DataHandleType type = DepairDataHandleType(req_meta.cmd);
     switch (type.requestType) {
       case RequestType::kRowSparsePushPull:
@@ -314,7 +314,7 @@ class KVStoreDistServer {
       if (has_multi_precision_copy(type)) CopyFromTo(stored, store_[key]);
       stored.WaitToRead();
 
-      LOG(INFO) << " stored value is " << *(stored.data().dptr<float>());
+      if(log_verbose_) LOG(INFO) << " stored value is " << *(stored.data().dptr<float>());
       // reset needed for gradient compression
       if (reset_merged) update_buf->merged = 0;
     } else {
@@ -594,7 +594,7 @@ class KVStoreDistServer {
     CHECK_EQ(type.dtype, mshadow::kFloat32)
       << "Gradient compression is currently supported for fp32 only";
     if (req_meta.push) {
-      LOG(INFO) << "rank: " << ps::MyRank() << " received compressed push";
+     if(log_verbose_) LOG(INFO) << "rank: " << ps::MyRank() << " received compressed push";
       // first for dummy key which represents original size of array, whose len is 0
       CHECK_EQ(req_data.keys.size(), (size_t)2);
       CHECK_EQ(req_data.lens.size(), (size_t)2);

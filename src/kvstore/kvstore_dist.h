@@ -59,7 +59,7 @@ class KVStoreDist : public KVStoreLocal {
       }
     }
     bigarray_bound_ = dmlc::GetEnv("MXNET_KVSTORE_BIGARRAY_BOUND", 1000 * 1000);
-    log_verbose_ = false; //dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
+    log_verbose_ = dmlc::GetEnv("MXNET_KVSTORE_DIST_VERBOSE", false);
   }
 
   virtual ~KVStoreDist() {
