@@ -27,7 +27,7 @@ import mxnet as mx
 def _get_lr_scheduler(args, kv):
     if 'lr_factor' not in args or args.lr_factor >= 1:
         return (args.lr, None)
-    epoch_size = args.num_examples / args.batch_size
+    epoch_size = int(args.num_examples / args.batch_size)
     if 'dist' in args.kv_store:
         epoch_size /= kv.num_workers
     begin_epoch = args.load_epoch if args.load_epoch else 0
@@ -48,7 +48,10 @@ def _get_lr_scheduler(args, kv):
 
     steps = [epoch_size * (x - begin_epoch)
              for x in step_epochs if x - begin_epoch > 0]
-    return (lr, mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=args.lr_factor))
+    if steps:
+        return (lr, mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=args.lr_factor))
+    else:
+        return (lr, None)
 
 
 def _load_model(args, rank=0):
@@ -62,7 +65,6 @@ def _load_model(args, rank=0):
         model_prefix, args.load_epoch)
     logging.info('Loaded model %s_%04d.params', model_prefix, args.load_epoch)
     return (sym, arg_params, aux_params)
-
 
 def _save_model(args, rank=0):
     if args.model_prefix is None:
@@ -305,3 +307,5 @@ def fit(args, network, data_loader, **kwargs):
               epoch_end_callback=checkpoint,
               allow_missing=True,
               monitor=monitor)
+
+    mx.model.save_checkpoint(prefix, iter_no + 1, sym, arg, aux)
