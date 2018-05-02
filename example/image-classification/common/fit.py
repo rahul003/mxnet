@@ -67,7 +67,7 @@ def _load_model(args, rank=0):
     return (sym, arg_params, aux_params)
 
 def _save_model(args, rank=0):
-    if args.model_prefix is None:
+    if args.model_prefix is None or args.save_final_model_only:
         return None
     dst_dir = os.path.dirname(args.model_prefix)
     if not os.path.isdir(dst_dir):
@@ -113,6 +113,7 @@ def add_fit_args(parser):
                        help='show progress for every n batches')
     train.add_argument('--model-prefix', type=str,
                        help='model prefix')
+    train.add_argument('--save-final-model-only', action='store_true', default=False)
     parser.add_argument('--monitor', dest='monitor', type=int, default=0,
                         help='log network parameters every N iters if larger than 0')
     train.add_argument('--load-epoch', type=int,
@@ -308,4 +309,6 @@ def fit(args, network, data_loader, **kwargs):
               allow_missing=True,
               monitor=monitor)
 
-    mx.model.save_checkpoint(prefix, iter_no + 1, sym, arg, aux)
+    if args.save_final_model_only and args.model_prefix:
+        mx.model.save_checkpoint(args.model_prefix, args.num_epochs, network,
+                                 arg_params, aux_params)
