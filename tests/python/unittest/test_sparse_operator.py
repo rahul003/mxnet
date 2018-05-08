@@ -349,6 +349,19 @@ def test_elemwise_binary_ops():
                                 lhs_density=lhs_density, rhs_density=rhs_density,
                                 verbose=False)
 
+        if ((lhs_stype is 'default' and rhs_stype is 'row_sparse') or
+            (lhs_stype is 'default' and rhs_stype is 'csr')):
+            test_elemwise_binary_op("elemwise_add", lhs_stype, rhs_stype, shape,
+                                    lambda l, r: mx.sym.sparse.elemwise_add(l, r, out=l),
+                                    lambda l, r: l + r,
+                                    lambda outg, l, r: (outg, outg),
+                                    lhs_grad_stype, rhs_grad_stype,
+                                    ograd_density=ograd_density,
+                                    force_lr_overlap=force_lr_overlap,
+                                    force_grad_overlap=force_grad_overlap,
+                                    lhs_density=lhs_density, rhs_density=rhs_density,
+                                    verbose=False)
+
         test_elemwise_binary_op("elemwise_sub", lhs_stype, rhs_stype, shape,
                                 lambda l, r: mx.sym.sparse.elemwise_sub(l, r),
                                 lambda l, r: l - r,
@@ -1336,10 +1349,9 @@ def test_sparse_dot():
     test_sparse_dot_zero_output(rand_shape_2d(50, 200), False, 40)
     test_sparse_dot_zero_output(rand_shape_2d(50, 200), True, 40)
 
-
 @with_seed()
 def test_sparse_dot_determinism():
-    def test_dot_determinism(lhs_stype, rhs_stype, lhs_density, rhs_density, transpose_a, transpose_b):
+    def test_dot_determinism(lhs_stype, rhs_stype, lhs_density, rhs_density, transpose_a, transpose_b, forward_stype):
         lhs_row = rnd.randint(50, 100)
         lhs_col = rnd.randint(50, 100)
         if transpose_a:
@@ -1352,18 +1364,17 @@ def test_sparse_dot_determinism():
                 rhs_shape = (rnd.randint(50, 100), lhs_col)
             else:
                 rhs_shape = (lhs_col, rnd.randint(50, 100))
-        if default_context() == mx.cpu():
-            forward_stype = 'csr'
-        else:
-            forward_stype = 'default'
         lhs_shape = (lhs_row, lhs_col)
         lhs = rand_ndarray(lhs_shape, lhs_stype, density=lhs_density)
         rhs = rand_ndarray(rhs_shape, rhs_stype, density=rhs_density)
         res1 = mx.nd.sparse.dot(lhs, rhs, transpose_a=transpose_a, transpose_b=transpose_b, forward_stype=forward_stype)
         res2 = mx.nd.sparse.dot(lhs, rhs, transpose_a=transpose_a, transpose_b=transpose_b, forward_stype=forward_stype)
         assert_almost_equal(res1.asnumpy(), res2.asnumpy(), rtol=0.0, atol=0.0)
-    test_dot_determinism('default', 'csr', 1.0, 0.1, False, False)
-    test_dot_determinism('default', 'csr', 1.0, 0.1, False, True)
+
+    test_dot_determinism('csr', 'default', 0.1, 1.0, True, False, 'row_sparse')
+    forward_stype = 'csr' if default_context() == mx.cpu() else 'default'
+    test_dot_determinism('default', 'csr', 1.0, 0.1, False, False, forward_stype)
+    test_dot_determinism('default', 'csr', 1.0, 0.1, False, True, forward_stype)
 
 
 @with_seed()
