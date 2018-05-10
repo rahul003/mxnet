@@ -89,8 +89,8 @@ def _create_kvstore(kvstore, num_device, arg_params):
     else:
         raise TypeError('kvstore must be KVStore, str or None')
 
-    if kv is None:
-        update_on_kvstore = False
+    #if kv is None:
+    update_on_kvstore = False
 
     return (kv, update_on_kvstore)
 

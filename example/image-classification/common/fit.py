@@ -122,6 +122,8 @@ def add_fit_args(parser):
                        help='load the model on an epoch using the model-load-prefix')
     train.add_argument('--top-k', type=int, default=0,
                        help='report the top-k accuracy. 0 means no report.')
+    train.add_argument('--trust-coefficient', type=float, default=0.002,
+                       help='trust coefficient for LARC SGD optimizer')
     train.add_argument('--loss', type=str, default='',
                        help='show the cross-entropy or nll loss. ce strands for cross-entropy, nll-loss stands for likelihood loss')
     train.add_argument('--test-io', type=int, default=0,
@@ -212,6 +214,8 @@ def fit(args, network, data_loader, **kwargs):
     has_momentum = {'sgd', 'dcasgd', 'nag'}
     if args.optimizer in has_momentum:
         optimizer_params['momentum'] = args.mom
+    if args.optimizer == 'larc':
+        optimizer_params['trust_coefficient'] = args.trust_coefficient
 
     monitor = mx.mon.Monitor(
         args.monitor, pattern=".*") if args.monitor > 0 else None
