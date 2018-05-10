@@ -29,7 +29,7 @@ def _get_lr_scheduler(args, kv):
         return (args.lr, None)
     epoch_size = int(args.num_examples / args.batch_size)
     if 'dist' in args.kv_store:
-        epoch_size /= kv.num_workers
+        epoch_size = int(epoch_size/kv.num_workers)
     begin_epoch = args.load_epoch if args.load_epoch else 0
     if 'pow' in args.lr_step_epochs:
         lr = args.lr
@@ -72,7 +72,7 @@ def _save_model(args, rank=0):
     dst_dir = os.path.dirname(args.model_prefix)
     if not os.path.isdir(dst_dir):
         os.mkdir(dst_dir)
-    period = args.num_epochs if args.save_final_model_only else 1
+    period = args.num_epochs if args.save_final_model_only else args.save_period
     return mx.callback.do_checkpoint(args.model_prefix if rank == 0 else "%s-%d" % (
         args.model_prefix, rank), period=period)
 
@@ -115,6 +115,7 @@ def add_fit_args(parser):
     train.add_argument('--model-prefix', type=str,
                        help='model prefix')
     train.add_argument('--save-final-model-only', action='store_true', default=False)
+    train.add_argument('--save-period', type=int, default=1)
     parser.add_argument('--monitor', dest='monitor', type=int, default=0,
                         help='log network parameters every N iters if larger than 0')
     train.add_argument('--load-epoch', type=int,
@@ -139,6 +140,7 @@ def add_fit_args(parser):
                        help='the epochs to ramp-up lr to scaled large-batch value')
     train.add_argument('--warmup-strategy', type=str, default='linear',
                        help='the ramping-up strategy for large batch sgd')
+    train.add_argument('--rank', type=int)
     return train
 
 
@@ -292,7 +294,7 @@ def fit(args, network, data_loader, **kwargs):
     if 'batch_end_callback' in kwargs:
         cbs = kwargs['batch_end_callback']
         batch_end_callbacks += cbs if isinstance(cbs, list) else [cbs]
-
+    train = mx.io.ResizeIter(train, math.ceil(int(args.num_examples/kv.num_workers)/args.batch_size))
     # run
     model.fit(train,
               begin_epoch=args.load_epoch if args.load_epoch else 0,
