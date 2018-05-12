@@ -142,7 +142,8 @@ def add_fit_args(parser):
                        help='the epochs to ramp-up lr to scaled large-batch value')
     train.add_argument('--warmup-strategy', type=str, default='linear',
                        help='the ramping-up strategy for large batch sgd')
-    train.add_argument('--rank', type=int)
+    train.add_argument('--larc-warmup-epochs', type=int, default=0)
+    train.add_argument('--larc-warmup-lr', type=float, default=0.5)
     return train
 
 
@@ -216,6 +217,11 @@ def fit(args, network, data_loader, **kwargs):
         optimizer_params['momentum'] = args.mom
     if args.optimizer == 'larc':
         optimizer_params['trust_coefficient'] = args.trust_coefficient
+        if args.larc_warmup_epochs > 0:
+            epoch_size = args.num_examples / args.batch_size / kv.num_workers
+            optimizer_params['lr_scheduler'] = mx.lr_scheduler.WarmupScheduler(args.larc_warmup_lr,
+                                                                               args.larc_warmup_epochs * epoch_size,
+                                                                               lr_scheduler)
 
     monitor = mx.mon.Monitor(
         args.monitor, pattern=".*") if args.monitor > 0 else None
