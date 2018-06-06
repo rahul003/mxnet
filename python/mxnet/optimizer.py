@@ -27,7 +27,7 @@ from .base import py_str
 from .ndarray import (NDArray, zeros, clip, sqrt, cast, maximum, abs as NDabs)
 from .ndarray import (sgd_update, sgd_mom_update, adam_update, rmsprop_update, rmspropalex_update,
                       mp_sgd_update, mp_sgd_mom_update, square, ftrl_update, ftml_update,
-                      signsgd_update, signum_update)
+                      signsgd_update, signum_update, larc_sgd_mom_update, larc_sgd_update, larc_mp_sgd_update, larc_mp_sgd_mom_update)
 from .ndarray import sparse
 from .random import normal
 
@@ -1457,6 +1457,72 @@ class Test(Optimizer):
         """Performs w += rescale_grad * grad."""
         weight[:] += grad * self.rescale_grad
         state[:] = weight
+
+@register
+class LARC(Optimizer):
+    """
+    Apply LARC on SGD optimizer
+    """
+    def __init__(self, momentum=0.0, trust_coefficient=0.01, lazy_update=True, **kwargs):
+        super(LARC, self).__init__(**kwargs)
+        self.momentum = momentum
+        self.lazy_update = lazy_update
+        self.trust_coefficient = trust_coefficient
+
+    def create_state_multi_precision(self, index, weight):
+        weight_master_copy = None
+        if self.multi_precision and weight.dtype == numpy.float16:
+            weight_master_copy = weight.astype(numpy.float32)
+            return (self.create_state(index, weight_master_copy), weight_master_copy)
+        if weight.dtype == numpy.float16 and not self.multi_precision:
+            warnings.warn("Accumulating with float16 in optimizer can lead to "
+                          "poor accuracy or slow convergence. "
+                          "Consider using multi_precision=True option of the "
+                          "SGD optimizer")
+        return self.create_state(index, weight)
+
+    def create_state(self, index, weight):
+        momentum = None
+        stype = weight.stype if self.lazy_update else 'default'
+        if self.momentum != 0.0:
+            momentum = zeros(weight.shape, weight.context, dtype=weight.dtype, stype=stype)
+        return momentum
+
+
+    def _update_impl(self, index, weight, grad, state, multi_precision=False):
+        assert (isinstance(weight, NDArray))
+        assert (isinstance(grad, NDArray))
+
+        lr = self._get_lr(index)
+        wd = self._get_wd(index)
+        self._update_count(index)
+
+        # do the regular sgd update flow
+        kwargs = {'rescale_grad': self.rescale_grad,
+                  'trust_coeff': self.trust_coefficient}
+        grad *= self.rescale_grad
+        if self.momentum > 0:
+            kwargs['momentum'] = self.momentum
+        if not multi_precision:
+            if state is not None:
+                larc_sgd_mom_update(weight, grad, state, out=weight, lr=lr, wd=wd, **kwargs)
+            else:
+                larc_sgd_update(weight, grad, out=weight, lr=lr, wd=wd, **kwargs)
+        else:
+            if state[0] is not None:
+                larc_mp_sgd_mom_update(weight, grad, state[0], state[1], out=weight,
+                                       lr=lr, wd=wd, **kwargs)
+            else:
+                larc_mp_sgd_update(weight, grad, state[1], out=weight,
+                                   lr=lr, wd=wd, **kwargs)
+
+    def update(self, index, weight, grad, state):
+        self._update_impl(index, weight, grad, state, multi_precision=False)
+
+    def update_multi_precision(self, index, weight, grad, state):
+        use_multi_precision = self.multi_precision and weight.dtype == numpy.float16
+        self._update_impl(index, weight, grad, state,
+                          multi_precision=use_multi_precision)
 
 # backward compatibility wrapper for Optimizer.CreateOptimizer
 create = Optimizer.create_optimizer  # pylint: disable=invalid-name
