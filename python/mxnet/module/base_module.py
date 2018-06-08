@@ -493,7 +493,7 @@ class BaseModule(object):
             validation_metric = eval_metric
         if not isinstance(eval_metric, metric.EvalMetric):
             eval_metric = metric.create(eval_metric)
-
+        num_update = 0
         ################################################################################
         # training loop
         ################################################################################
@@ -524,15 +524,16 @@ class BaseModule(object):
 
                 if end_of_batch:
                     eval_name_vals = eval_metric.get_name_value()
-
+   
                 if batch_end_callback is not None:
+                    lr = optimizer_params['lr_scheduler'](num_update)
                     batch_end_params = BatchEndParam(epoch=epoch, nbatch=nbatch,
                                                      eval_metric=eval_metric,
                                                      locals=locals())
                     for callback in _as_list(batch_end_callback):
                         callback(batch_end_params)
                 nbatch += 1
-
+                num_update += 1
             # one epoch of training is finished
             for name, val in eval_name_vals:
                 self.logger.info('Epoch[%d] Train-%s=%f', epoch, name, val)
