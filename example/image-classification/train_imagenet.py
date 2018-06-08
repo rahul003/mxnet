@@ -33,7 +33,6 @@ if __name__ == '__main__':
     data.add_data_aug_args(parser)
     # set to 0 for standard resnet augmentation
     data.set_data_aug_level(parser, 0)
-    data.set_resnet_aug(parser)
     parser.set_defaults(
         # network
         network          = 'resnet',
