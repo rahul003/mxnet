@@ -23,8 +23,6 @@ import re
 import math
 import mxnet as mx
 
-from gluoncv.utils import makedirs
-
 def _get_lr_scheduler(args, kv):
     if 'lr_factor' not in args or args.lr_factor >= 1:
         return (args.lr, None)
@@ -156,12 +154,8 @@ def fit(args, network, data_loader, **kwargs):
                                      'threshold': args.gc_threshold})
 
     # logging
-#    head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
-    logging_handlers = [logging.StreamHandler()]
-    if args.log:
-        makedirs(args.logging_dir)
-        logging_handlers.append(logging.FileHandler('%s%s'%(args.logging_dir, args.log), mode='w'))
-    logging.basicConfig(level=logging.DEBUG, handlers=logging_handlers)
+    head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
+    logging.basicConfig(level=logging.DEBUG, format=head)
     logging.info(args)
 
     # data iterators

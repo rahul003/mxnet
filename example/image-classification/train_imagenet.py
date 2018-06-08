@@ -44,28 +44,24 @@ if __name__ == '__main__':
         min_random_scale = 1, # if input image has min size k, suggest to use
                               # 256.0/x, e.g. 0.533 for 480
         # train
-        num_epochs       = 80,
-        lr_step_epochs   = '30,60',
+        num_epochs       = 90,
+        lr_step_epochs   = '30,60,80',
         dtype            = 'float32'
     )
     args = parser.parse_args()
 
     # load network
     from importlib import import_module
-    #if args.network == "resnet-v1":
-        #sym = mx.symbol.load('resnet50_v1.json')
-    if args.network == "resnet-v1b":
-        if args.dtype == 'float32':
-            sym = mx.symbol.load('resnet50_v1b.json')
-        elif args.dtype == 'float16':
-            net = get_model('resnet50_v1b', ctx=[mx.gpu(int(i)) for i in args.gpus.split(',')], pretrained=False, classes=1000, last_gamma=args.bn_gamma_init0)
-            d = mx.sym.var('data')
+    if args.network == "resnet-v1b" and args.num_layers == 50:
+        net = get_model('resnet50_v1b', ctx=[mx.gpu(int(i)) for i in args.gpus.split(',')], pretrained=False, classes=args.num_classes, last_gamma=args.bn_gamma_init0)
+        d = mx.sym.var('data')
+        if args.dtype == 'float16':
             d = mx.sym.Cast(data=d, dtype=np.float16)
-            net.cast(np.float16)
-            out = net(d)
-            
+        net.cast(args.dtype)
+        out = net(d)
+        if args.dtype == 'float16':
             out = mx.sym.Cast(data=out, dtype=np.float32)
-            sym = mx.sym.SoftmaxOutput(out, name='softmax')
+        sym = mx.sym.SoftmaxOutput(out, name='softmax')
     else:
         net = import_module('symbols.'+args.network)
         sym = net.get_symbol(**vars(args))
