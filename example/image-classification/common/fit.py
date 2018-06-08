@@ -23,13 +23,12 @@ import re
 import math
 import mxnet as mx
 
-def get_epoch_size(args, kv):
-    return math.ceil(int(args.num_examples / kv.num_workers) / args.batch_size)
+from gluoncv.utils import makedirs
 
 def _get_lr_scheduler(args, kv):
     if 'lr_factor' not in args or args.lr_factor >= 1:
         return (args.lr, None)
-    epoch_size = get_epoch_size(args, kv)
+    epoch_size = math.ceil(int(args.num_examples / kv.num_workers)/ args.batch_size)
     begin_epoch = args.load_epoch if args.load_epoch else 0
     if 'pow' in args.lr_step_epochs:
         lr = args.lr
@@ -48,10 +47,8 @@ def _get_lr_scheduler(args, kv):
 
     steps = [epoch_size * (x - begin_epoch)
              for x in step_epochs if x - begin_epoch > 0]
-    if steps:
-        return (lr, mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=args.lr_factor))
-    else:
-        return (lr, None)
+    return (lr, mx.lr_scheduler.MultiFactorScheduler(base_lr=args.lr, step=steps, factor=args.lr_factor))
+
 
 def _load_model(args, rank=0):
     if 'load_epoch' not in args or args.load_epoch is None:
@@ -135,6 +132,13 @@ def add_fit_args(parser):
                        help='the epochs to ramp-up lr to scaled large-batch value')
     train.add_argument('--warmup-strategy', type=str, default='linear',
                        help='the ramping-up strategy for large batch sgd')
+    train.add_argument('--logging-dir', type=str, default='logs')
+    train.add_argument('--log', type=str, default='')
+    train.add_argument('--bn-gamma-init0', action='store_true')
+    train.add_argument('--epoch-size',type=int, default=0,
+                       help='set number of batches in an epoch. useful for debugging')
+    train.add_argument('--tensorboard', type=str, default='',
+                       help='log parameters to visualize in tensorboard every epoch. takes name to specify as tensorboard run. Empty means tensorboard logging is disabled')
     return train
 
 
@@ -152,20 +156,16 @@ def fit(args, network, data_loader, **kwargs):
                                      'threshold': args.gc_threshold})
 
     # logging
-    head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
-    logging.basicConfig(level=logging.DEBUG, format=head)
-    logging.info('start with arguments %s', args)
-    
-    epoch_size = get_epoch_size(args, kv)
+#    head = '%(asctime)-15s Node[' + str(kv.rank) + '] %(message)s'
+    logging_handlers = [logging.StreamHandler()]
+    if args.log:
+        makedirs(args.logging_dir)
+        logging_handlers.append(logging.FileHandler('%s%s'%(args.logging_dir, args.log), mode='w'))
+    logging.basicConfig(level=logging.DEBUG, handlers=logging_handlers)
+    logging.info(args)
 
     # data iterators
     (train, val) = data_loader(args, kv)
-    if 'dist' in args.kv_store and not 'async' in args.kv_store:
-        logging.info('Resizing training data to %d batches per machine', epoch_size)
-        # resize train iter to ensure each machine has same number of batches per epoch
-        # if not, dist_sync can hang at the end with one machine waiting for other machines
-        train = mx.io.ResizeIter(train, epoch_size)
-
     if args.test_io:
         tic = time.time()
         for i, batch in enumerate(train):
@@ -175,7 +175,6 @@ def fit(args, network, data_loader, **kwargs):
                 logging.info('Batch [%d]\tSpeed: %.2f samples/sec', i,
                              args.disp_batches * args.batch_size / (time.time() - tic))
                 tic = time.time()
-
         return
 
     # load model
@@ -189,21 +188,29 @@ def fit(args, network, data_loader, **kwargs):
 
     # save model
     checkpoint = _save_model(args, kv.rank)
-
+    epoch_end_callbacks = []
+    if checkpoint:
+        epoch_end_callbacks.append(checkpoint)
+    if args.tensorboard:
+        lm = mx.contrib.tensorboard.LogMetricsCallback("./logs/"+args.tensorboard)
+        epoch_end_callbacks.append(lm.node_histogram_visualization())
+    
     # devices for training
     devs = mx.cpu() if args.gpus is None or args.gpus == "" else [
         mx.gpu(int(i)) for i in args.gpus.split(',')]
 
     # learning rate
     lr, lr_scheduler = _get_lr_scheduler(args, kv)
-
     # create model
     model = mx.mod.Module(
         context=devs,
         symbol=network
     )
 
-    lr_scheduler = lr_scheduler
+    epoch_size = math.ceil(int(args.num_examples/kv.num_workers)/args.batch_size)
+    if args.warmup_epochs > 0:
+        lr_scheduler = mx.lr_scheduler.WarmupScheduler(0, args.lr, epoch_size * args.warmup_epochs, lr_scheduler)
+
     optimizer_params = {
         'learning_rate': lr,
         'wd': args.wd,
@@ -221,7 +228,11 @@ def fit(args, network, data_loader, **kwargs):
     # A limited number of optimizers have a warmup period
     has_warmup = {'lbsgd', 'lbnag'}
     if args.optimizer in has_warmup:
-        nworkers = kv.num_workers
+        if 'dist' in args.kv_store:
+            nworkers = kv.num_workers
+        else:
+            nworkers = 1
+        epoch_size = args.num_examples / args.batch_size / nworkers
         if epoch_size < 1:
             epoch_size = 1
         macrobatch_size = args.macrobatch_size
@@ -293,6 +304,10 @@ def fit(args, network, data_loader, **kwargs):
         cbs = kwargs['batch_end_callback']
         batch_end_callbacks += cbs if isinstance(cbs, list) else [cbs]
 
+    if args.epoch_size:
+        train = mx.io.ResizeIter(train, args.epoch_size)
+    else:
+        train = mx.io.ResizeIter(train, math.ceil(int(args.num_examples/kv.num_workers)/args.batch_size))
     # run
     model.fit(train,
               begin_epoch=args.load_epoch if args.load_epoch else 0,
@@ -306,6 +321,6 @@ def fit(args, network, data_loader, **kwargs):
               arg_params=arg_params,
               aux_params=aux_params,
               batch_end_callback=batch_end_callbacks,
-              epoch_end_callback=checkpoint,
+              epoch_end_callback=epoch_end_callbacks,
               allow_missing=True,
               monitor=monitor)

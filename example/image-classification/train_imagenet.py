@@ -22,7 +22,8 @@ logging.basicConfig(level=logging.DEBUG)
 from common import find_mxnet, data, fit
 from common.util import download_file
 import mxnet as mx
-
+import numpy as np
+from gluoncv.model_zoo import get_model
 if __name__ == '__main__':
     # parse args
     parser = argparse.ArgumentParser(description="train imagenet-1k",
@@ -31,7 +32,7 @@ if __name__ == '__main__':
     data.add_data_args(parser)
     data.add_data_aug_args(parser)
     # use a large aug level
-    data.set_data_aug_level(parser, 3)
+    data.set_data_aug_level(parser, 0)
     parser.set_defaults(
         # network
         network          = 'resnet',
@@ -51,8 +52,23 @@ if __name__ == '__main__':
 
     # load network
     from importlib import import_module
-    net = import_module('symbols.'+args.network)
-    sym = net.get_symbol(**vars(args))
-
+    #if args.network == "resnet-v1":
+        #sym = mx.symbol.load('resnet50_v1.json')
+    if args.network == "resnet-v1b":
+        if args.dtype == 'float32':
+            sym = mx.symbol.load('resnet50_v1b.json')
+        elif args.dtype == 'float16':
+            net = get_model('resnet50_v1b', ctx=[mx.gpu(int(i)) for i in args.gpus.split(',')], pretrained=False, classes=1000, last_gamma=args.bn_gamma_init0)
+            d = mx.sym.var('data')
+            d = mx.sym.Cast(data=d, dtype=np.float16)
+            net.cast(np.float16)
+            out = net(d)
+            
+            out = mx.sym.Cast(data=out, dtype=np.float32)
+            sym = mx.sym.SoftmaxOutput(out, name='softmax')
+    else:
+        net = import_module('symbols.'+args.network)
+        sym = net.get_symbol(**vars(args))
+    
     # train
     fit.fit(args, sym, data.get_rec_iter)
