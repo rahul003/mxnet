@@ -1,0 +1,14 @@
+python train_imagenet.py --gpus 0,1,2,3,4,5,6,7 --batch-size 2048 \
+    --network resnet-v1b --num-layers 50 \
+    --data-train /media/ramdisk/pass-through/train-passthrough.rec \
+    --data-val /media/ramdisk/pass-through/val-passthrough.rec \
+    --data-train-idx /media/ramdisk/pass-through/train-passthrough.idx \
+    --data-nthreads 40 --optimizer sgd --dtype float16 \
+    --lr 0.8 --lr-step-epochs 30,60,80 --num-epochs 90 \
+    --max-random-area 1 --min-random-area 0.08 \
+    --max-random-scale 1 --min-random-scale 1 \
+    --pca-noise 0.1 --brightness 0.4 --contrast 0.4 --saturation 0.4 \
+    --min-random-aspect-ratio 0.75 --max-random-aspect-ratio 1.33 \
+    --max-random-shear-ratio 0 --max-random-rotate-angle 0 \
+    --random-resized-crop 1 --random-crop 0 --random-mirror 1 \
+    --warmup-epochs 5 --bn-gamma-init0 2>&1 | tee resnet50_v1b.log
