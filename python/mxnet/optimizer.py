@@ -1468,7 +1468,7 @@ class LARC(Optimizer):
         self.momentum = momentum
         self.lazy_update = lazy_update
         self.trust_coefficient = trust_coefficient
-
+        logging.info('using larc with tc='+str(trust_coefficient))
     def create_state_multi_precision(self, index, weight):
         weight_master_copy = None
         if self.multi_precision and weight.dtype == numpy.float16:
@@ -1487,7 +1487,6 @@ class LARC(Optimizer):
         if self.momentum != 0.0:
             momentum = zeros(weight.shape, weight.context, dtype=weight.dtype, stype=stype)
         return momentum
-
 
     def _update_impl(self, index, weight, grad, state, multi_precision=False):
         assert (isinstance(weight, NDArray))

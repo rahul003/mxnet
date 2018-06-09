@@ -22,18 +22,18 @@ parser.add_argument('--data-train', type=str, default='/media/ramdisk/pass-throu
 parser.add_argument('--data-val', type=str, default='/media/ramdisk/pass-through/val-passthrough.rec')
 parser.add_argument('--data-train-idx', type=str, default='/media/ramdisk/pass-through/train-passthrough.idx')
 parser.add_argument('--data-val-idx', type=str, default='')
-parser.add_argument('--recio', action='store_true')
 parser.add_argument('--optimizer', type=str, default='nag')
+parser.add_argument('--no-recio', action='store_false', dest='recio')
 parser.add_argument('--dummy', action='store_true',
                     help='use dummy data to test training speed. default is false.')
-parser.add_argument('--batch-size', type=int, default=128,
+parser.add_argument('--batch-size', type=int, default=256,
                     help='training batch size per device (CPU/GPU).')
-parser.add_argument('--gpus', type=str, default='0')
+parser.add_argument('--gpus', type=str, default='0,1,2,3,4,5,6,7')
 parser.add_argument('-j', '--num-data-workers', dest='num_workers', default=4, type=int,
                     help='number of preprocessing workers')
-parser.add_argument('--num-epochs', type=int, default=3,
+parser.add_argument('--num-epochs', type=int, default=90,
                     help='number of training epochs.')
-parser.add_argument('--lr', type=float, default=0.1,
+parser.add_argument('--lr', type=float, default=0.8,
                     help='learning rate. default is 0.1.')
 parser.add_argument('--momentum', type=float, default=0.9,
                     help='momentum value for optimizer, default is 0.9.')
@@ -44,7 +44,7 @@ parser.add_argument('--lr-factor', type=float, default=0.1,
 parser.add_argument('--lr-step-epochs', type=str, default='30,60,80')
 parser.add_argument('--mode', type=str, default='hybrid',
                     help='mode in which to train the model. options are symbolic, imperative, hybrid')
-parser.add_argument('--model', type=str, required=True,
+parser.add_argument('--model', type=str, default='resnet50_v1b',
                     help='type of model to use. see vision_model for options.')
 parser.add_argument('--use_se', action='store_true',
                     help='use SE layers or not in resnext. default is false.')
@@ -66,7 +66,7 @@ parser.add_argument('--logging-dir', type=str, default='logs',
                     help='directory of training logs')
 parser.add_argument('--save-plot-dir', type=str, default='plots',
                     help='the path to save the history plot')
-parser.add_argument('--dtype', type=str, default='float32')
+parser.add_argument('--dtype', type=str, default='float16')
 parser.add_argument('--params-file', type=str, default='')
 parser.add_argument('--contrast', type=float, default=0.4)
 parser.add_argument('--saturation', type=float, default=0.4)
@@ -85,8 +85,10 @@ parser.add_argument('--kv-store', type=str, default='device')
 parser.add_argument('--warmup-epochs', type=int, default=0)
 parser.add_argument('--log', type=str, default='')
 parser.add_argument('--log-dist-name', type=str, default='')
+parser.add_argument('--trust-coefficient', type=float, default=0.002)
 parser.add_argument('--bn-gamma-init0', action='store_true')
 opt = parser.parse_args()
+
 kv = mx.kvstore.create(opt.kv_store)
 logging_handlers = [logging.StreamHandler()]
 if opt.log or opt.log_dist_name:
@@ -98,7 +100,7 @@ if opt.log or opt.log_dist_name:
     makedirs(opt.logging_dir)
     logging_handlers.append(logging.FileHandler('%s/%s'%(opt.logging_dir, log_filename), mode='w'))
 if 'dist' in opt.kv_store:
-    logging.basicConfig(level=logging.INFO, handlers=logging_handlers, format=head)
+    logging.basicConfig(level=logging.INFO, handlers=logging_handlers)#, format=head)
 else:
     logging.basicConfig(level=logging.INFO, handlers=logging_handlers)
 logging.info(opt)
