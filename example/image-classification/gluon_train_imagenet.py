@@ -103,7 +103,8 @@ if 'dist' in opt.kv_store:
     logging.basicConfig(level=logging.INFO, handlers=logging_handlers)#, format=head)
 else:
     logging.basicConfig(level=logging.INFO, handlers=logging_handlers)
-logging.info(opt)
+if not kv.rank:
+    logging.info(opt)
 
 batch_size = opt.batch_size
 classes = 1000
@@ -463,7 +464,7 @@ def train(epochs, ctx):
         train_history.update([err_top1, err_top1_val])
         train_history.plot(['training-top1-err', 'validation-top1-err'], save_path='%s/%s_top1.png'%(plot_path, opt.log))
         logging.info('[Epoch %d] training: acc-top1=%f'%(epoch, top1))
-        logging.info('[Epoch %d] time cost: %f'%(epoch, time.time()-tic))
+        logging.info('[Epoch %d] time cost: %f ; lr: %f'%(epoch, time.time()-tic, trainer.learning_rate))
         logging.info('[Epoch %d] validation: acc-top1=%f'%(epoch, 1 - err_top1_val))
 
         if err_top1_val < best_val_score and epoch > 50:
