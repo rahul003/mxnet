@@ -289,7 +289,8 @@ int MXSetProfilerConfig(int num_params, const char* const* keys, const char* con
       int mode = 0;
       if (param.profile_api || param.profile_all)        { mode |= profiler::Profiler::kAPI; }
       if (param.profile_symbolic || param.profile_all)   { mode |= profiler::Profiler::kSymbolic; }
-      if (param.profile_imperative || param.profile_all) { mode |= profiler::Profiler::kImperative; }
+      if (param.profile_imperative ||
+          param.profile_all) { mode |= profiler::Profiler::kImperative; }
       if (param.profile_memory || param.profile_all)     { mode |= profiler::Profiler::kMemory; }
       profiler::Profiler::Get()->SetConfig(profiler::Profiler::ProfilerMode(mode),
                                            std::string(param.filename),

@@ -44,7 +44,8 @@ namespace kvstore {
 
 // maintain same order in frontend.
 enum class CommandType {
-  kController, kSetMultiPrecision, kStopServer, kSyncMode, kSetGradientCompression, kSetProfilerParams
+  kController, kSetMultiPrecision, kStopServer, kSyncMode,
+  kSetGradientCompression, kSetProfilerParams
 };
 
 enum class RequestType {
