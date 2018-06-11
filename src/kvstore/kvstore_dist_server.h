@@ -239,13 +239,13 @@ class KVStoreDistServer {
         SetProfilerConfig(body.substr(0, body.size() - 1));
         break;
       case KVStoreServerProfilerCommand::kState:
-        MXSetProfilerState(static_cast<int>(body.front() - '0'), 0, nullptr);
+        MXSetProfilerState(static_cast<int>(body.front() - '0'), 0);
         break;
       case KVStoreServerProfilerCommand::kPause:
-        MXProfilePause(static_cast<int>(body.front() - '0'), 0, nullptr);
+        MXProfilePause(static_cast<int>(body.front() - '0'), 0);
         break;
       case KVStoreServerProfilerCommand::kDump:
-        MXDumpProfile(static_cast<int>(body.front() - '0'), 0, nullptr);
+        MXDumpProfile(static_cast<int>(body.front() - '0'), 0);
         break;
     }
   }
@@ -275,7 +275,7 @@ class KVStoreDistServer {
       std::snprintf(cval, parts[1].length() + 1, "%s", parts[1].c_str());
       cvals.push_back(cval);
     }
-    MXSetProfilerConfig(elems.size(), &ckeys[0], &cvals[0], nullptr);
+    MXSetProfilerConfig(elems.size(), &ckeys[0], &cvals[0]);
     for (size_t i=0; i < ckeys.size(); i++) {
       delete[] ckeys[i];
       delete[] cvals[i];

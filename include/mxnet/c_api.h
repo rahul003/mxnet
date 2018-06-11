@@ -237,8 +237,8 @@ MXNET_DLL int MXNotifyShutdown();
  * \param kvstoreHandle handle to kvstore
  * \return 0 when success, -1 when failure happens.
  */
-MXNET_DLL int MXSetProfilerConfig(int num_params, const char* const* keys, const char* const* vals,
-                                  KVStoreHandle kvstoreHandle);
+MXNET_DLL int MXSetServerProfilerConfig(int num_params, const char* const* keys, const char* const* vals,
+                                        KVStoreHandle kvstoreHandle);
 
 /*!
  * \brief Set up configuration of profiler
@@ -260,7 +260,7 @@ MXNET_DLL int MXSetProfilerConfig(int num_params, const char* const* keys, const
  * \param kvstoreHandle handle to kvstore
  * \return 0 when success, -1 when failure happens.
  */
-MXNET_DLL int MXSetProfilerState(int state, int profile_process, KVStoreHandle kvStoreHandle);
+MXNET_DLL int MXSetServerProfilerState(int state, int profile_process, KVStoreHandle kvStoreHandle);
 
 /*!
  * \brief Set up state of profiler
@@ -283,7 +283,7 @@ MXNET_DLL int MXSetProfilerState(int state, int profile_process);
  * \param kvstoreHandle handle to kvstore
  * \return 0 when success, -1 when failure happens.
  */
-MXNET_DLL int MXDumpProfile(int finished, int profile_process, KVStoreHandle kvStoreHandle);
+MXNET_DLL int MXDumpServerProfile(int finished, int profile_process, KVStoreHandle kvStoreHandle);
 
 
 /*!
@@ -313,7 +313,7 @@ MXNET_DLL int MXAggregateProfileStatsPrint(const char **out_str, int reset);
  * \return 0 when success, -1 when failure happens.
  * \note pausing and resuming is global and not recursive
  */
-MXNET_DLL int MXProfilePause(int paused, int profile_process, KVStoreHandle kvStoreHandle);
+MXNET_DLL int MXServerProfilePause(int paused, int profile_process, KVStoreHandle kvStoreHandle);
 
 /*!
  * \brief Pause profiler tuning collection
