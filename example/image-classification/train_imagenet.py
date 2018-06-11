@@ -35,7 +35,7 @@ if __name__ == '__main__':
     data.set_data_aug_level(parser, 0)
     parser.set_defaults(
         # network
-        network          = 'resnet',
+        network          = 'resnet-v1b',
         num_layers       = 50,
         # data
         num_classes      = 1000,
@@ -44,9 +44,9 @@ if __name__ == '__main__':
         min_random_scale = 1, # if input image has min size k, suggest to use
                               # 256.0/x, e.g. 0.533 for 480
         # train
-        num_epochs       = 80,
-        lr_step_epochs   = '30,60',
-        dtype            = 'float32'
+        num_epochs       = 90,
+        lr_step_epochs   = 'pow2',
+        dtype            = 'float16'
     )
     args = parser.parse_args()
 
@@ -65,7 +65,7 @@ if __name__ == '__main__':
             out = net(d)
             
             out = mx.sym.Cast(data=out, dtype=np.float32)
-            sym = mx.sym.SoftmaxOutput(out, name='softmax')
+            sym = mx.sym.SoftmaxOutput(out, name='softmax')#, grad_scale=1024.0)
     else:
         net = import_module('symbols.'+args.network)
         sym = net.get_symbol(**vars(args))
