@@ -237,7 +237,8 @@ MXNET_DLL int MXNotifyShutdown();
  * \param kvstoreHandle handle to kvstore
  * \return 0 when success, -1 when failure happens.
  */
-MXNET_DLL int MXSetServerProfilerConfig(int num_params, const char* const* keys, const char* const* vals,
+MXNET_DLL int MXSetServerProfilerConfig(int num_params, const char* const* keys,
+                                        const char* const* vals,
                                         KVStoreHandle kvstoreHandle);
 
 /*!
