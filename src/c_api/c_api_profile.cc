@@ -302,7 +302,7 @@ int MXSetServerProfilerConfig(int num_params, const char* const* keys, const cha
 }
 
 int MXSetProfilerConfig(int num_params, const char* const* keys, const char* const* vals) {
-  MXSetServerProfilerConfig(num_params, keys, vals, nullptr);
+  return MXSetServerProfilerConfig(num_params, keys, vals, nullptr);
 }
 
 int MXAggregateProfileStatsPrint(const char **out_str, int reset) {
@@ -325,7 +325,7 @@ int MXAggregateProfileStatsPrint(const char **out_str, int reset) {
 }
 
 int MXDumpProfile(int finished, int profile_process) {
-  MXDumpServerProfile(finished, profile_process, nullptr);
+  return MXDumpServerProfile(finished, profile_process, nullptr);
 }
 
 int MXDumpServerProfile(int finished, int profile_process, KVStoreHandle kvStoreHandle) {
@@ -346,7 +346,7 @@ int MXDumpServerProfile(int finished, int profile_process, KVStoreHandle kvStore
 }
 
 int MXSetProfilerState(int state, int profile_process) {
-  MXSetServerProfilerState(state, profile_process, nullptr);
+  return MXSetServerProfilerState(state, profile_process, nullptr);
 }
 
 int MXSetServerProfilerState(int state, int profile_process, KVStoreHandle kvStoreHandle) {
@@ -504,7 +504,7 @@ int MXProfileDurationStop(ProfileHandle duration_handle) {
 }
 
 int MXProfilePause(int paused, int profile_process) {
-  MXServerProfilePause(paused, profile_process, nullptr);
+  return MXServerProfilePause(paused, profile_process, nullptr);
 }
 
 int MXServerProfilePause(int paused, int profile_process, KVStoreHandle kvStoreHandle) {
