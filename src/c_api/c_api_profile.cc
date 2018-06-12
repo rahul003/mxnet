@@ -261,8 +261,8 @@ struct ProfileMarkerScopeParam : public dmlc::Parameter<ProfileMarkerScopeParam>
 
 DMLC_REGISTER_PARAMETER(ProfileMarkerScopeParam);
 
-int MXSetServerProfilerConfig(int num_params, const char* const* keys, const char* const* vals,
-                              KVStoreHandle kvstoreHandle) {
+int MXSetProcessProfilerConfig(int num_params, const char* const* keys, const char* const* vals,
+                               KVStoreHandle kvstoreHandle) {
     mxnet::IgnoreProfileCallScope ignore;
   API_BEGIN();
     std::vector<std::pair<std::string, std::string>> kwargs;
@@ -302,7 +302,7 @@ int MXSetServerProfilerConfig(int num_params, const char* const* keys, const cha
 }
 
 int MXSetProfilerConfig(int num_params, const char* const* keys, const char* const* vals) {
-  return MXSetServerProfilerConfig(num_params, keys, vals, nullptr);
+  return MXSetProcessProfilerConfig(num_params, keys, vals, nullptr);
 }
 
 int MXAggregateProfileStatsPrint(const char **out_str, int reset) {
@@ -324,11 +324,11 @@ int MXAggregateProfileStatsPrint(const char **out_str, int reset) {
   API_END();
 }
 
-int MXDumpProfile(int finished, int profile_process) {
-  return MXDumpServerProfile(finished, profile_process, nullptr);
+int MXDumpProfile(int finished) {
+  return MXDumpProcessProfile(finished, static_cast<int>(ProfileProcess::kWorker), nullptr);
 }
 
-int MXDumpServerProfile(int finished, int profile_process, KVStoreHandle kvStoreHandle) {
+int MXDumpProcessProfile(int finished, int profile_process, KVStoreHandle kvStoreHandle) {
   mxnet::IgnoreProfileCallScope ignore;
   API_BEGIN();
     if (static_cast<ProfileProcess>(profile_process) == ProfileProcess::kServer) {
@@ -345,11 +345,11 @@ int MXDumpServerProfile(int finished, int profile_process, KVStoreHandle kvStore
   API_END()
 }
 
-int MXSetProfilerState(int state, int profile_process) {
-  return MXSetServerProfilerState(state, profile_process, nullptr);
+int MXSetProfilerState(int state) {
+  return MXSetProcessProfilerState(state, static_cast<int>(ProfileProcess::kWorker), nullptr);
 }
 
-int MXSetServerProfilerState(int state, int profile_process, KVStoreHandle kvStoreHandle) {
+int MXSetProcessProfilerState(int state, int profile_process, KVStoreHandle kvStoreHandle) {
   mxnet::IgnoreProfileCallScope ignore;
   // state, kNotRunning: 0, kRunning: 1
   API_BEGIN();
@@ -503,11 +503,11 @@ int MXProfileDurationStop(ProfileHandle duration_handle) {
   API_END();
 }
 
-int MXProfilePause(int paused, int profile_process) {
-  return MXServerProfilePause(paused, profile_process, nullptr);
+int MXProfilePause(int paused) {
+  return MXProcessProfilePause(paused, static_cast<int>(ProfileProcess::kWorker), nullptr);
 }
 
-int MXServerProfilePause(int paused, int profile_process, KVStoreHandle kvStoreHandle) {
+int MXProcessProfilePause(int paused, int profile_process, KVStoreHandle kvStoreHandle) {
   mxnet::IgnoreProfileCallScope ignore;
   API_BEGIN();
     if (static_cast<ProfileProcess>(profile_process) == ProfileProcess::kServer) {
