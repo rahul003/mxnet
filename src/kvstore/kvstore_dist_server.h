@@ -239,13 +239,13 @@ class KVStoreDistServer {
         SetProfilerConfig(body.substr(0, body.size() - 1));
         break;
       case KVStoreServerProfilerCommand::kState:
-        MXSetProfilerState(static_cast<int>(body.front() - '0'), 0);
+        MXSetProfilerState(static_cast<int>(body.front() - '0'));
         break;
       case KVStoreServerProfilerCommand::kPause:
-        MXProfilePause(static_cast<int>(body.front() - '0'), 0);
+        MXProfilePause(static_cast<int>(body.front() - '0'));
         break;
       case KVStoreServerProfilerCommand::kDump:
-        MXDumpProfile(static_cast<int>(body.front() - '0'), 0);
+        MXDumpProfile(static_cast<int>(body.front() - '0'));
         break;
     }
   }
