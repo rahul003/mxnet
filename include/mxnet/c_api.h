@@ -242,7 +242,7 @@ MXNET_DLL int MXSetProcessProfilerConfig(int num_params, const char* const* keys
                                          KVStoreHandle kvstoreHandle);
 
 /*!
- * \brief Set up configuration of profiler for worker process
+ * \brief Set up configuration of profiler for worker/current process
  * \param num_params Number of parameters
  * \param keys array of parameter keys
  * \param vals array of parameter values
@@ -256,7 +256,7 @@ MXNET_DLL int MXSetProfilerConfig(int num_params, const char* const* keys, const
  *  profiler not running when state == 0,
  *  profiler running when state == 1
  * \param profile_process an int,
- * when 0 command is for worker process,
+ * when 0 command is for worker/current process,
  * when 1 command is for server process
  * \param kvstoreHandle handle to kvstore, needed for server process profiling
  * \return 0 when success, -1 when failure happens.
@@ -264,7 +264,7 @@ MXNET_DLL int MXSetProfilerConfig(int num_params, const char* const* keys, const
 MXNET_DLL int MXSetProcessProfilerState(int state, int profile_process, KVStoreHandle kvStoreHandle);
 
 /*!
- * \brief Set up state of profiler for worker process
+ * \brief Set up state of profiler for current process
  * \param state indicate the working state of profiler,
  *  profiler not running when state == 0,
  *  profiler running when state == 1
@@ -276,7 +276,7 @@ MXNET_DLL int MXSetProfilerState(int state);
  * \brief Save profile and stop profiler
  * \param finished true if stat output should stop after this point
  * \param profile_process an int,
- * when 0 command is for worker process,
+ * when 0 command is for worker/current process,
  * when 1 command is for server process
  * \param kvstoreHandle handle to kvstore
  * \return 0 when success, -1 when failure happens.
@@ -285,11 +285,8 @@ MXNET_DLL int MXDumpProcessProfile(int finished, int profile_process, KVStoreHan
 
 
 /*!
- * \brief Save profile and stop profiler for worker process
+ * \brief Save profile and stop profiler for worker/current process
  * \param finished true if stat output should stop after this point
- * \param profile_process an int,
- * when 0 command is for worker process,
- * when 1 command is for server process
  * \return 0 when success, -1 when failure happens.
  */
 MXNET_DLL int MXDumpProfile(int finished);
@@ -314,7 +311,7 @@ MXNET_DLL int MXAggregateProfileStatsPrint(const char **out_str, int reset);
 MXNET_DLL int MXProcessProfilePause(int paused, int profile_process, KVStoreHandle kvStoreHandle);
 
 /*!
- * \brief Pause profiler tuning collection for worker process
+ * \brief Pause profiler tuning collection for worker/current process
  * \param paused If nonzero, profiling pauses. Otherwise, profiling resumes/continues
  * \return 0 when success, -1 when failure happens.
  * \note pausing and resuming is global and not recursive
