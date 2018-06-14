@@ -18,6 +18,8 @@
 """Scheduling learning rate."""
 import logging
 
+from math import pi, cos
+
 class LRScheduler(object):
     """Base class of a learning rate scheduler.
 
@@ -153,7 +155,7 @@ class PolyScheduler(LRScheduler):
 
     """
 
-    def __init__(self, max_update, base_lr=0.01, pwr=2):
+    def __init__(self, max_update, warmup_steps =0, base_lr=0.01, pwr=2):
         super(PolyScheduler, self).__init__(base_lr)
         assert isinstance(max_update, int)
         if max_update < 1:
@@ -162,12 +164,46 @@ class PolyScheduler(LRScheduler):
         self.max_update = max_update
         self.power = pwr
         self.base_lr = self.base_lr_orig
+        self.warmup_steps = warmup_steps
+    def __call__(self, num_update):
+        if num_update <= self.max_update:
+            self.base_lr = self.base_lr_orig * pow(1.0 - float(num_update - self.warmup_steps) / float(self.max_update - self.warmup_steps),
+                                                   self.power)
+        return self.base_lr
+
+class CosineScheduler(LRScheduler):
+    """ Reduce the learning rate by given a list of steps.
+
+    Calculate the new learning rate by::
+
+       base_lr * (1-nup/max_nup)^pwr
+       if nup < max_nup, 0 otherwise.
+
+    Parameters
+    ----------
+       max_update: maximum number of updates before the decay reaches 0.
+       base_lr:    base learning rate
+       pwr:   power of the decay term as a funtion of the current number of updates.
+
+    """
+
+    def __init__(self, max_update, warmup_steps=0, base_lr=0.01, final_lr=0):
+        super(CosineScheduler, self).__init__(base_lr)
+        assert isinstance(max_update, int)
+        if max_update < 1:
+            raise ValueError("maximum number of updates must be strictly positive")
+        self.base_lr_orig = self.base_lr
+        self.max_update = max_update
+        self.base_lr = self.base_lr_orig
+        self.final_lr = final_lr
+        self.warmup_steps = warmup_steps
 
     def __call__(self, num_update):
         if num_update <= self.max_update:
-            self.base_lr = self.base_lr_orig * pow(1.0 - float(num_update) / float(self.max_update),
-                                                   self.power)
-        return self.base_lr
+            self.learning_rate = self.final_lr + (self.base_lr - self.final_lr) * \
+                    (1 + cos(pi * (num_update - self.warmup_steps) / (self.max_update - self.warmup_steps))) / 2
+        return self.learning_rate
+
 
 class WarmupScheduler(LRScheduler):
     """Implement linear warmup
@@ -196,8 +232,6 @@ class WarmupScheduler(LRScheduler):
             if num_update not in self.lrs_updates:
                 l = self.lr_begin + (self.base_lr - self.lr_begin) * float(num_update)/float(self.warmup_steps)
                 self.lrs_updates[num_update] = l
-                #logging.info('lr for num_update ' + str(num_update) + ' is ' + str(self.lrs_updates[num_update]))
         if num_update not in self.lrs_updates:
             self.lrs_updates[num_update] = self.scheduler(num_update)
-            #logging.info('lr for num_update ' + str(num_update) + ' is ' + str(self.lrs_updates[num_update]))
         return self.lrs_updates[num_update]

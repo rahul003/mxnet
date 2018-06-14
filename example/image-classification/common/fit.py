@@ -33,12 +33,20 @@ def _get_lr_scheduler(args, kv):
         return (args.lr, None)
     epoch_size = get_epoch_size(args, kv)
     begin_epoch = args.load_epoch if args.load_epoch else 0
-    if 'pow' in args.lr_step_epochs:
+    
+    warmup_steps = epoch_size * args.warmup_epochs
+    if 'pow' in args.lr_step_epochs or 'cos' in args.lr_step_epochs:
         lr = args.lr
         max_up = args.num_epochs * epoch_size
-        pwr = float(re.sub('pow[- ]*', '', args.lr_step_epochs))
-        poly_sched = mx.lr_scheduler.PolyScheduler(max_up, lr, pwr)
-        return (lr, poly_sched)
+# max_update, warmup_steps=0, base_lr=0.01
+        if 'pow' in args.lr_step_epochs:
+            pwr = float(re.sub('pow[- ]*', '', args.lr_step_epochs))
+            sched = mx.lr_scheduler.PolyScheduler(max_up, warmup_steps=warmup_steps, base_lr=lr, pwr=pwr)
+        else:
+            sched = mx.lr_scheduler.CosineScheduler(max_up, warmup_steps=warmup_steps, base_lr=lr)
+        if args.warmup_epochs:
+            sched = mx.lr_scheduler.WarmupScheduler(0, args.lr, warmup_steps, sched)
+        return (lr, sched)
     step_epochs = [int(l) for l in args.lr_step_epochs.split(',')]
     lr = args.lr
     for s in step_epochs:
@@ -51,7 +59,10 @@ def _get_lr_scheduler(args, kv):
     steps = [epoch_size * (x - begin_epoch)
              for x in step_epochs if x - begin_epoch > 0]
     if steps:
-        return (lr, mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=args.lr_factor))
+        sched = mx.lr_scheduler.MultiFactorScheduler(step=steps, factor=args.lr_factor)
+        if args.warmup_epochs:
+            sched = mx.lr_scheduler.WarmupScheduler(o, args.lr, warmup_steps, sched)
+        return (lr, sched)
     else:
         return (lr, None)
 
@@ -238,9 +249,6 @@ def fit(args, network, data_loader, **kwargs):
         context=devs,
         symbol=network
     )
-
-    if args.warmup_epochs > 0:
-        lr_scheduler = mx.lr_scheduler.WarmupScheduler(0, args.lr, epoch_size * args.warmup_epochs, lr_scheduler)
 
     optimizer_params = {
         'learning_rate': lr,

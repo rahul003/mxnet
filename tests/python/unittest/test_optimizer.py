@@ -1032,8 +1032,13 @@ def test_adagrad():
                             compare_optimizer(opt1(**kwarg), opt2(**kwarg), shape, dtype,
                                               w_stype='row_sparse', g_stype='row_sparse')
 
-
-
+def test_cosine_scheduler():
+    sched = mx.lr_scheduler.CosineScheduler(1000, 100, base_lr=8)
+    for i in range(1000):
+        if i==101:
+            print('next')
+        print(sched(i))
+    raise ValueError
 if __name__ == '__main__':
     import nose
     nose.runmodule()
