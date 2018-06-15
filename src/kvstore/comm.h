@@ -686,16 +686,16 @@ class CommDevice : public Comm {
     }
     if (enabled != n*(n-1)) {
       // print warning info if not fully enabled
-      LOG(WARNING) << "only " << enabled <<  " out of "
-                   << n*(n-1) << " GPU pairs are enabled direct access. "
-                   << "It may affect the performance. "
-                   << "You can set MXNET_ENABLE_GPU_P2P=0 to turn it off";
+      //LOG(WARNING) << "only " << enabled <<  " out of "
+      //             << n*(n-1) << " GPU pairs are enabled direct access. "
+       //            << "It may affect the performance. "
+       //            << "You can set MXNET_ENABLE_GPU_P2P=0 to turn it off";
       std::string access(n, '.');
       for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
           access[j] = p2p[i*n+j] ? 'v' : '.';
         }
-        LOG(WARNING) << access;
+     //   LOG(WARNING) << access;
       }
     }
 #endif

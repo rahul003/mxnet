@@ -226,6 +226,7 @@ def get_rec_iter(args, kv=None):
     max_shear_ratio     = args.max_random_shear_ratio,
     preprocess_threads  = args.data_nthreads,
     shuffle             = True,
+    verbose             = False,
     num_parts           = nworker,
     part_index          = rank)
     val = mx.io.ImageRecordIter(
@@ -244,5 +245,6 @@ def get_rec_iter(args, kv=None):
     rand_crop           = False,
     rand_mirror         = False,
     num_parts           = nworker,
+    verbose             = False,
     part_index          = rank)
     return train,val
