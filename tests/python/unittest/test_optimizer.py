@@ -240,7 +240,7 @@ def test_sgd():
 class PySGDLarc(mx.optimizer.Optimizer):
     """python reference implemenation of sgd"""
     def __init__(self, learning_rate=0.01, momentum=0.0, multi_precision=False, trust_coefficient=0.01, clip=True, **kwargs):
-        super(PySGD, self).__init__(learning_rate=learning_rate, **kwargs)
+        super(PySGDLarc, self).__init__(learning_rate=learning_rate, **kwargs)
         self.momentum = momentum
         self.multi_precision = multi_precision
         self.trust_coefficient = trust_coefficient
@@ -296,11 +296,11 @@ class PySGDLarc(mx.optimizer.Optimizer):
         use_multi_precision = isinstance(state, list) or isinstance(state, tuple)
 
         grad_norm = mx.nd.norm(grad).asscalar()
-        weight_norm = mx.nd.norm(weight).asscalar()
-        if grad_norm!=0 and weight_norm!=0:
+        param_norm = mx.nd.norm(weight).asscalar()
+        if grad_norm!=0 and param_norm!=0:
             adaptive_lr = self.trust_coefficient * (param_norm) / (grad_norm + param_norm * wd + self.eps)
             if self.clip:
-                adaptive_lr = min(adaptive_lr/lr['lr'], 1)
+                adaptive_lr = min(adaptive_lr/lr, 1)
             lr = adaptive_lr
             if not use_multi_precision:
                 if self.momentum == 0.0:

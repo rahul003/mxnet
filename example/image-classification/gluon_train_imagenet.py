@@ -243,6 +243,9 @@ elif model_name.startswith('resnet'):
 optimizer = opt.optimizer
 optimizer_params = {'learning_rate': opt.lr, 'wd': opt.wd, 'momentum': opt.momentum, 'multi_precision':True}
 
+if optimizer == 'larc':
+    optimizer_params['trust_coefficient'] = opt.trust_coefficient
+
 net = get_model(model_name, **kwargs)
 net.initialize(mx.init.MSRAPrelu(), ctx=context)
 net.cast(opt.dtype)
