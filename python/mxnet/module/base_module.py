@@ -536,12 +536,10 @@ class BaseModule(object):
                         callback(batch_end_params)
                 nbatch += 1
                 num_update += 1
-
+            toc = time.time()
             # one epoch of training is finished
             for name, val in eval_name_vals:
-                self.logger.info('Epoch[%d] Train-%s=%f', epoch, name, val)
-            toc = time.time()
-            self.logger.info('Epoch[%d] Time cost=%.3f', epoch, (toc-tic))
+                self.logger.info('Epoch[%d] Train-%s=%f Time-cost=%f', epoch, name, val, toc-tic)
 
             # sync aux params across devices
             arg_params, aux_params = self.get_params()
