@@ -982,8 +982,6 @@ class SGLD(Optimizer):
         weight[:] += - lr/2 * (grad + wd * weight) + normal(0, math.sqrt(lr), shape=weight.shape,
                                                             dtype=weight.dtype, ctx=weight.context)
 
-
-
 @register  # pylint: disable=invalid-name
 class ccSGD(SGD):
     """[DEPRECATED] Same as `SGD`. Left here for backward compatibility."""
@@ -1468,7 +1466,7 @@ class LARC(Optimizer):
         self.momentum = momentum
         self.lazy_update = lazy_update
         self.trust_coefficient = trust_coefficient
-        logging.info('using larc with tc='+str(trust_coefficient))
+
     def create_state_multi_precision(self, index, weight):
         weight_master_copy = None
         if self.multi_precision and weight.dtype == numpy.float16:

@@ -236,6 +236,146 @@ def test_sgd():
                                 compare_optimizer(opt1(**kwarg), opt2(**kwarg), shape[:2],
                                                   dtype, w_stype='csr', g_stype='csr')
 
+
+class PySGDLarc(mx.optimizer.Optimizer):
+    """python reference implemenation of sgd"""
+    def __init__(self, learning_rate=0.01, momentum=0.0, multi_precision=False, trust_coefficient=0.01, clip=True, **kwargs):
+        super(PySGD, self).__init__(learning_rate=learning_rate, **kwargs)
+        self.momentum = momentum
+        self.multi_precision = multi_precision
+        self.trust_coefficient = trust_coefficient
+        # to handle numerical instability
+        self.eps=1e-8
+        self.clip = clip
+
+    def create_state(self, index, weight):
+        """Create additional optimizer state: momentum
+
+        Parameters
+        ----------
+        weight : NDArray
+        The weight data
+
+        """
+        momentum = None
+        weight_master_copy = None
+        do_multi_precision = self.multi_precision and weight.dtype == np.float16
+        if do_multi_precision:
+            if self.momentum != 0.0:
+                momentum = mx.nd.zeros(weight.shape, weight.context, dtype=np.float32)
+            weight_master_copy = array(weight, ctx=weight.context, dtype=np.float32)
+            return (momentum, weight_master_copy)
+        else:
+            if self.momentum != 0.0:
+                momentum = mx.nd.zeros(weight.shape, weight.context, dtype=weight.dtype)
+            return momentum
+
+    def create_state_multi_precision(self, index, weight):
+        return self.create_state(index, weight)
+
+    def update(self, index, weight, grad, state):
+        """Update the parameters.
+
+        Parameters
+        ----------
+        index : int
+        An unique integer key used to index the parameters
+
+        weight : NDArray
+        weight ndarray
+
+        grad : NDArray
+        grad ndarray
+
+        state : NDArray or other objects returned by init_state
+        The auxiliary state used in optimization.
+        """
+        lr = self._get_lr(index)
+        wd = self._get_wd(index)
+        self._update_count(index)
+        use_multi_precision = isinstance(state, list) or isinstance(state, tuple)
+
+        grad_norm = mx.nd.norm(grad).asscalar()
+        weight_norm = mx.nd.norm(weight).asscalar()
+        if grad_norm!=0 and weight_norm!=0:
+            adaptive_lr = self.trust_coefficient * (param_norm) / (grad_norm + param_norm * wd + self.eps)
+            if self.clip:
+                adaptive_lr = min(adaptive_lr/lr['lr'], 1)
+            lr = adaptive_lr
+            if not use_multi_precision:
+                if self.momentum == 0.0:
+                    if self.clip_gradient is not None:
+                        weight[:] = ((1 - lr*wd)*weight -
+                                     lr*mx.nd.clip(grad*self.rescale_grad, -self.clip_gradient, self.clip_gradient))
+                    else:
+                        weight[:] = (1 - lr*wd)*weight - lr*self.rescale_grad*grad
+                else:
+                    mom = state
+                    if self.clip_gradient is not None:
+                        mom[:] = (self.momentum*mom - lr*wd*weight -
+                                  lr*mx.nd.clip(grad*self.rescale_grad, -self.clip_gradient, self.clip_gradient))
+                        weight += mom
+                    else:
+                        mom[:] = self.momentum*mom - lr*wd*weight - lr*self.rescale_grad*grad
+                        weight += mom
+            else:
+                grad32 = array(grad, ctx=grad.context, dtype=np.float32)
+                mom = state[0]
+                weight32 = state[1]
+                if self.momentum == 0.0:
+                    if self.clip_gradient is not None:
+                        weight32[:] = ((1 - lr*wd)*weight32 -
+                                       lr*mx.nd.clip(grad32*self.rescale_grad, -self.clip_gradient, self.clip_gradient))
+                    else:
+                        weight32[:] = (1 - lr*wd)*weight32 - lr*self.rescale_grad*grad32
+                else:
+                    if self.clip_gradient is not None:
+                        mom[:] = (self.momentum*mom - lr*wd*weight32 -
+                                  lr*mx.nd.clip(grad32*self.rescale_grad, -self.clip_gradient, self.clip_gradient))
+                        weight32 += mom
+                    else:
+                        mom[:] = self.momentum*mom - lr*wd*weight32 - lr*self.rescale_grad*grad32
+                        weight32 += mom
+                tmp = weight32.astype(weight.dtype)
+                tmp.copyto(weight)
+
+    def update_multi_precision(self, index, weight, grad, state):
+        self.update(index, weight, grad, state)
+
+@with_seed()
+def test_larcsgd():
+    opt1 = PySGDLarc
+    opt2 = mx.optimizer.LARC
+    shape = (3, 4, 5)
+    mom_options = [{}, {'momentum': 0.9}]
+    cg_options = [{}, {'clip_gradient': 0.4}, {'clip_gradient': 0.5}]
+    rg_options = [{}, {'rescale_grad': 0.14}, {'rescale_grad': 0.8}]
+    wd_options = [{}, {'wd': 0.03}, {'wd': 0.05}, {'wd': 0.07}]
+    mp_options = [{}, {'multi_precision': False}, {'multi_precision': True}]
+    for dtype in [np.float16, np.float32, np.float64]:
+        for mom_option in mom_options:
+            for cg_option in cg_options:
+                for rg_option in rg_options:
+                    for wd_option in wd_options:
+                        for mp_option in mp_options:
+                            kwarg = {'trust_coefficient': 0.002}
+                            kwarg.update(mom_option)
+                            kwarg.update(cg_option)
+                            kwarg.update(rg_option)
+                            kwarg.update(wd_option)
+                            kwarg.update(mp_option)
+                            if (dtype == np.float16 and
+                                    ('multi_precision' not in kwarg or
+                                     not kwarg['multi_precision'])):
+                                continue
+                            compare_optimizer(opt1(**kwarg), opt2(**kwarg), shape, dtype)
+                            # test operator fallback on cpu
+                            if dtype != np.float16:
+                                compare_optimizer(opt1(**kwarg), opt2(**kwarg), shape[:2],
+                                                  dtype, w_stype='csr', g_stype='csr')
+
+
+
 class PySparseSGD(mx.optimizer.Optimizer):
     """python reference implemenation of sgd"""
     def __init__(self, learning_rate=0.01, momentum=0.0, **kwargs):
