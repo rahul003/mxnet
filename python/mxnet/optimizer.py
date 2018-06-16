@@ -79,7 +79,7 @@ class Optimizer(object):
     def __init__(self, rescale_grad=1., param_idx2name=None, wd=0.,
                  clip_gradient=None, learning_rate=0.01,
                  lr_scheduler=None, sym=None, begin_num_update=0,
-                 multi_precision=False, param_dict=None):
+                 multi_precision=False, param_dict=None, use_larc=False, larc_trust_coefficient=0.01, larc_clip_lr=True):
         self.rescale_grad = rescale_grad
         self.lr = learning_rate
         self.lr_scheduler = lr_scheduler
@@ -94,6 +94,9 @@ class Optimizer(object):
         self._index_update_count = {}
         self.clip_gradient = clip_gradient
         self.multi_precision = multi_precision
+        self.larc_trust_coefficient = larc_trust_coefficient
+        self.larc_clip_lr = larc_clip_lr
+        self.use_larc = use_larc
 
         if param_idx2name is None:
             param_idx2name = {}
@@ -377,7 +380,7 @@ class Optimizer(object):
         self._index_update_count[index] += 1
         self.num_update = max(self._index_update_count[index], self.num_update)
 
-    def _get_lr(self, index):
+    def _get_lr(self, index, grad, weight):
         """Gets the learning rate given the index of the weight.
 
         Parameters
@@ -401,6 +404,20 @@ class Optimizer(object):
             lr *= self.lr_mult[index]
         elif index in self.idx2name:
             lr *= self.lr_mult.get(self.idx2name[index], 1.0)
+
+
+        if self.use_larc:
+            grad_norm = grad.norm()
+            wd = self._get_wd(index)
+            param_norm = weight.norm()
+            if param_norm != 0 and grad_norm != 0:
+                #torch
+                # adaptive_lr = self.trust_coefficient * (param_norm / (grad_norm + param_norm * wd + 1e-8))
+                #tf
+                adaptive_lr = self.trust_coefficient * (param_norm / grad_norm)
+                if self.clip_lr:
+                    adaptive_lr = min(adaptive_lr, lr)
+            lr = adaptive_lr
         return lr
 
     def _get_wd(self, index):
@@ -514,7 +531,7 @@ class SGD(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         kwargs = {'rescale_grad': self.rescale_grad}
@@ -587,7 +604,7 @@ class Signum(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         kwargs = {'rescale_grad': self.rescale_grad}
@@ -643,7 +660,7 @@ class FTML(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
         t = self._index_update_count[index]
 
@@ -806,7 +823,7 @@ class LBSGD(Optimizer):
         assert (isinstance(weight, NDArray))
         assert (isinstance(grad, NDArray))
 
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
         self._update_count(index)
 
@@ -883,7 +900,7 @@ class DCASGD(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         grad = grad * self.rescale_grad
@@ -936,7 +953,7 @@ class NAG(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         grad = grad * self.rescale_grad
@@ -973,7 +990,7 @@ class SGLD(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         grad = grad * self.rescale_grad
@@ -1053,7 +1070,7 @@ class Adam(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         t = self._index_update_count[index]
@@ -1102,7 +1119,7 @@ class AdaGrad(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         is_sparse = weight.stype == 'row_sparse' and grad.stype == 'row_sparse'
@@ -1177,7 +1194,7 @@ class RMSProp(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         kwargs = {'gamma1': self.gamma1, 'epsilon': self.epsilon,
@@ -1312,7 +1329,7 @@ class Ftrl(Optimizer):
         assert(isinstance(grad, NDArray))
         self._update_count(index)
         wd = self._get_wd(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
 
         kwargs = {'lamda1': self.lamda1, 'beta': self.beta, 'rescale_grad': self.rescale_grad}
         if self.clip_gradient:
@@ -1354,7 +1371,7 @@ class Adamax(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         t = self._index_update_count[index]
@@ -1412,7 +1429,7 @@ class Nadam(Optimizer):
         assert(isinstance(weight, NDArray))
         assert(isinstance(grad, NDArray))
         self._update_count(index)
-        lr = self._get_lr(index)
+        lr = self._get_lr(index, grad, weight)
         wd = self._get_wd(index)
 
         t = self._index_update_count[index]
@@ -1520,6 +1537,7 @@ class LARC(Optimizer):
         use_multi_precision = self.multi_precision and weight.dtype == numpy.float16
         self._update_impl(index, weight, grad, state,
                           multi_precision=use_multi_precision)
+
 
 # backward compatibility wrapper for Optimizer.CreateOptimizer
 create = Optimizer.create_optimizer  # pylint: disable=invalid-name

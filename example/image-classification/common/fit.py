@@ -150,7 +150,9 @@ def add_fit_args(parser):
                        help='the ramping-up strategy for large batch sgd')
     train.add_argument('--logging-dir', type=str, default='logs')
     train.add_argument('--log', type=str, default='')
+    train.add_argument('--use-larc', action='store_true')
     train.add_argument('--trust-coefficient', type=float, default=0.002)
+    train.add_argument('--use-larc-clip', action='store_true')
     train.add_argument('--bn-gamma-init0', action='store_true')
     train.add_argument('--epoch-size',type=int, default=0,
                        help='set number of batches in an epoch. useful for debugging')
@@ -255,11 +257,12 @@ def fit(args, network, data_loader, **kwargs):
         'wd': args.wd,
         'lr_scheduler': lr_scheduler,
         'multi_precision': True}
-    if args.optimizer == 'larc':
-        optimizer_params['trust_coefficient'] = args.trust_coefficient
+    optimizer_params['use_larc'] = args.use_larc
+    optimizer_params['use_larc_clip'] = args.use_larc_clip
+    optimizer_params['trust_coefficient'] = args.trust_coefficient
 
     # Only a limited number of optimizers have 'momentum' property
-    has_momentum = {'sgd', 'dcasgd', 'nag', 'larc'}
+    has_momentum = {'sgd', 'dcasgd', 'nag'}
     if args.optimizer in has_momentum:
         optimizer_params['momentum'] = args.mom
 
