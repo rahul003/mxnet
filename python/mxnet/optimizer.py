@@ -22,6 +22,7 @@ import logging
 import math
 import pickle
 import warnings
+import sys
 import numpy
 from .base import py_str
 from .ndarray import (NDArray, zeros, clip, sqrt, cast, maximum, abs as NDabs)
@@ -30,7 +31,7 @@ from .ndarray import (sgd_update, sgd_mom_update, adam_update, rmsprop_update, r
                       signsgd_update, signum_update)
 from .ndarray import sparse
 from .random import normal
-
+import numpy as np
 
 class Optimizer(object):
     """The base class inherited by all optimizers.
@@ -97,7 +98,7 @@ class Optimizer(object):
         self.larc_trust_coefficient = larc_trust_coefficient
         self.larc_clip_lr = larc_clip_lr
         self.use_larc = use_larc
-
+        logging.info('LARC Coeff: %f %s', larc_trust_coefficient, str(larc_clip_lr))
         if param_idx2name is None:
             param_idx2name = {}
         assert isinstance(param_idx2name, dict), \
@@ -108,7 +109,7 @@ class Optimizer(object):
 
         self.set_lr_mult({})
         self.set_wd_mult({})
-
+        
     opt_registry = {}
 
     @staticmethod
@@ -407,17 +408,20 @@ class Optimizer(object):
 
 
         if self.use_larc:
-            grad_norm = grad.norm()
+            grad_norm = grad.astype('float32', copy=False).norm().asscalar()
             wd = self._get_wd(index)
-            param_norm = weight.norm()
+            param_norm = weight.astype('float32', copy=False).norm().asscalar()
             if param_norm != 0 and grad_norm != 0:
                 #torch
-                # adaptive_lr = self.trust_coefficient * (param_norm / (grad_norm + param_norm * wd + 1e-8))
+                adaptive_lr = self.larc_trust_coefficient * (param_norm / (grad_norm + param_norm * wd + 1e-8))
                 #tf
-                adaptive_lr = self.trust_coefficient * (param_norm / grad_norm)
-                if self.clip_lr:
+                #adaptive_lr = self.larc_trust_coefficient * (param_norm / grad_norm)
+                
+                if self.larc_clip_lr:
                     adaptive_lr = min(adaptive_lr, lr)
-            lr = adaptive_lr
+                #logging.debug('grad_norm:%f, param_norm:%f, adaptive_lr:%f', grad_norm, param_norm, adaptive_lr)
+                lr = adaptive_lr
+            
         return lr
 
     def _get_wd(self, index):

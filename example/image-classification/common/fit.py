@@ -197,7 +197,7 @@ def fit(args, network, data_loader, **kwargs):
     if args.log:
         makedirs(args.logging_dir)
         logging_handlers.append(logging.FileHandler('%s%s'%(args.logging_dir, args.log), mode='w'))
-    logging.basicConfig(level=logging.DEBUG, handlers=logging_handlers)
+    logging.basicConfig(level=logging.INFO, handlers=logging_handlers)
     if not kv.rank:
         logging.info(args)
     
@@ -258,8 +258,8 @@ def fit(args, network, data_loader, **kwargs):
         'lr_scheduler': lr_scheduler,
         'multi_precision': True}
     optimizer_params['use_larc'] = args.use_larc
-    optimizer_params['use_larc_clip'] = args.use_larc_clip
-    optimizer_params['trust_coefficient'] = args.trust_coefficient
+    optimizer_params['larc_clip_lr'] = args.use_larc_clip
+    optimizer_params['larc_trust_coefficient'] = args.trust_coefficient
 
     # Only a limited number of optimizers have 'momentum' property
     has_momentum = {'sgd', 'dcasgd', 'nag'}
