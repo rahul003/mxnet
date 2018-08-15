@@ -23,7 +23,7 @@ import os
 import logging
 
 def score(model, data_val, metrics, gpus, batch_size, rgb_mean=None, mean_img=None,
-          image_shape='3,224,224', data_nthreads=4, label_name='softmax_label', max_num_examples=None):
+          image_shape='3,224,224', data_nthreads=4, label_name='softmax_label', max_num_examples=None, dtype='float32'):
     # create data iterator
     data_shape = tuple([int(i) for i in image_shape.split(',')])
     if mean_img is not None:
@@ -47,9 +47,16 @@ def score(model, data_val, metrics, gpus, batch_size, rgb_mean=None, mean_img=No
     if isinstance(model, str):
         # download model
         dir_path = os.path.dirname(os.path.realpath(__file__))
+        print(dir_path)
         (prefix, epoch) = modelzoo.download_model(
             model, os.path.join(dir_path, 'model'))
         sym, arg_params, aux_params = mx.model.load_checkpoint(prefix, epoch)
+        if dtype != 'float32':
+            network = model.split('-')[1]
+            num_layers = int(model.split('-')[2])
+            from importlib import import_module
+            net = import_module('symbols.'+network)
+            sym = net.get_symbol(num_classes=1000, num_layers=num_layers, **vars(args)) 
     elif isinstance(model, tuple) or isinstance(model, list):
         assert len(model) == 3
         (sym, arg_params, aux_params) = model
@@ -92,6 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('--image-shape', type=str, default='3,224,224')
     parser.add_argument('--data-nthreads', type=int, default=4,
                         help='number of threads for data decoding')
+    parser.add_argument('--dtype', type=str, default='float32')
     args = parser.parse_args()
 
     logger = logging.getLogger()
